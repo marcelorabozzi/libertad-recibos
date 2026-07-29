@@ -1,0 +1,23 @@
+{
+  "name": "libertad-recibos-converter",
+  "version": "1.0.0",
+  "description": "Conversor de recibos de sueldo vertical a horizontal",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "pdf-lib": "^1.17.1"
+  },
+  "keywords": [
+    "pdf",
+    "pdf-lib",
+    "recibos-de-sueldo"
+  ],
+  "author": "Antigravity",
+  "license": "ISC"
+}

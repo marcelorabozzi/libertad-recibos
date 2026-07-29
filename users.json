@@ -1,0 +1,12 @@
+{
+  "root": {
+    "password": "root",
+    "role": "root",
+    "displayName": "Administrador Root"
+  },
+  "libertad": {
+    "password": "1234",
+    "role": "operador",
+    "displayName": "Operador libertad"
+  }
+}
