@@ -660,8 +660,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (drawDividerCheckbox) drawDividerCheckbox.checked = true;
     
     if (cropTopSlider) {
-      cropTopSlider.value = 18;
-      cropTopValue.textContent = '18pt';
+      cropTopSlider.value = 0;
+      cropTopValue.textContent = '0pt';
     }
     if (cropBottomSlider) {
       cropBottomSlider.value = 80;
