@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const navUsuarios = document.getElementById('navUsuarios');
   const conversorView = document.getElementById('conversorView');
   const usuariosView = document.getElementById('usuariosView');
+  const versionLabel = document.getElementById('versionLabel');
 
   // Conversor - Elementos
   const pdfDropzone = document.getElementById('pdfDropzone');
@@ -32,23 +33,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnRemoveFile = document.getElementById('btnRemoveFile');
   
   const settingsSection = document.getElementById('settingsSection');
-  const conversionModeRadios = document.getElementsByName('conversionMode');
-  
-  const splitRatioSlider = document.getElementById('splitRatio');
-  const splitRatioValue = document.getElementById('splitRatioValue');
-  
-  const marginSlider = document.getElementById('margin');
-  const marginValue = document.getElementById('marginValue');
-  const drawDividerCheckbox = document.getElementById('drawDivider');
-
-  // Bounding Box Crop Sliders
-  const cropTopSlider = document.getElementById('cropTop');
-  const cropTopValue = document.getElementById('cropTopValue');
-  const cropBottomSlider = document.getElementById('cropBottom');
-  const cropBottomValue = document.getElementById('cropBottomValue');
-  const cropLeftSlider = document.getElementById('cropLeft');
-  const cropLeftValue = document.getElementById('cropLeftValue');
-  
   const btnConvert = document.getElementById('btnConvert');
   const btnText = btnConvert ? btnConvert.querySelector('.btn-text') : null;
   const btnLoader = btnConvert ? btnConvert.querySelector('.btn-loader') : null;
@@ -58,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const pdfPreviewIframe = document.getElementById('pdfPreviewIframe');
   const previewActions = document.getElementById('previewActions');
   const btnDownload = document.getElementById('btnDownload');
+  const btnFirma = document.getElementById('btnFirma');
 
   // Administración de Usuarios - Elementos
   const usersTableBody = document.getElementById('usersTableBody');
@@ -73,9 +58,74 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentUser = null;
   let uploadedFile = null;
   let convertedPdfUrl = null;
+  let appConfig = null;
 
-  // --- Validación de Sesión Inicial ---
-  checkSession();
+  // --- Carga de Configuración e Inicio ---
+  initialize();
+
+  async function initialize() {
+    await fetchConfig();
+    await fetchVersion();
+    await checkSession();
+  }
+
+  async function fetchVersion() {
+    try {
+      console.log('[DEBUG] Cargando versión...');
+      const response = await fetch(`/api/version?t=${Date.now()}`);
+      const data = await response.json();
+      if (versionLabel) {
+        versionLabel.textContent = `${data.version} build ${data.build}`;
+      }
+    } catch (error) {
+      console.error('[DEBUG] Error al cargar la versión:', error);
+    }
+  }
+
+  async function fetchConfig() {
+    try {
+      console.log('[DEBUG] Cargando configuración...');
+      const response = await fetch(`/api/config?t=${Date.now()}`);
+      appConfig = await response.json();
+      console.log('[DEBUG] Configuración cargada:', appConfig);
+      applyConfig();
+    } catch (error) {
+      console.error('[DEBUG] Error al cargar configuración:', error);
+    }
+  }
+
+  function applyConfig() {
+    console.log('[DEBUG] applyConfig ejecutado. Config:', appConfig);
+    if (!appConfig) return;
+
+    // Controlar botón de Procesar y Convertir PDF (btnConvert)
+    const hideConvert = appConfig.showConvertButton === false || String(appConfig.showConvertButton) === 'false';
+    if (btnConvert) {
+      if (hideConvert) {
+        console.log('[DEBUG] Ocultando botón de procesar y convertir');
+        btnConvert.style.setProperty('display', 'none', 'important');
+        btnConvert.classList.add('hidden');
+      } else {
+        console.log('[DEBUG] Mostrando botón de procesar y convertir');
+        btnConvert.style.removeProperty('display');
+        btnConvert.classList.remove('hidden');
+      }
+    }
+
+    // Controlar botón de firma
+    const hideSignature = appConfig.showSignatureButton === false || String(appConfig.showSignatureButton) === 'false';
+    if (btnFirma) {
+      if (hideSignature) {
+        console.log('[DEBUG] Ocultando botón de firma');
+        btnFirma.style.setProperty('display', 'none', 'important');
+        btnFirma.classList.add('hidden');
+      } else {
+        console.log('[DEBUG] Mostrando botón de firma');
+        btnFirma.style.removeProperty('display');
+        btnFirma.classList.remove('hidden');
+      }
+    }
+  }
 
   async function checkSession() {
     try {
@@ -543,39 +593,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Helper to check selected mode
-  function getSelectedMode() {
-    let mode = 'combine';
-    conversionModeRadios.forEach(radio => {
-      if (radio.checked) mode = radio.value;
-    });
-    return mode;
-  }
 
-  // Helper to enable/disable controls based on mode
-  function updateSettingsVisibility() {
-    if (!splitRatioSlider) return;
-    const mode = getSelectedMode();
-    const splitRatioGroup = splitRatioSlider.closest('.control-group');
-    
-    if (mode === 'combine') {
-      splitRatioSlider.setAttribute('disabled', 'true');
-      splitRatioGroup.classList.add('disabled-overlay');
-    } else {
-      if (uploadedFile) {
-        splitRatioSlider.removeAttribute('disabled');
-      }
-      splitRatioGroup.classList.remove('disabled-overlay');
-    }
-  }
-
-  // Add event listeners to mode radios
-  conversionModeRadios.forEach(radio => {
-    radio.addEventListener('change', () => {
-      console.log('[DEBUG] Modo cambiado a:', getSelectedMode());
-      updateSettingsVisibility();
-    });
-  });
 
   // Process the selected file
   function handleFile(file) {
@@ -598,19 +616,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Enable settings and convert button
     settingsSection.classList.add('active');
-    conversionModeRadios.forEach(radio => radio.removeAttribute('disabled'));
-    marginSlider.removeAttribute('disabled');
-    drawDividerCheckbox.removeAttribute('disabled');
-    
-    // Enable original cropping sliders
-    cropTopSlider.removeAttribute('disabled');
-    cropBottomSlider.removeAttribute('disabled');
-    cropLeftSlider.removeAttribute('disabled');
-    
     btnConvert.removeAttribute('disabled');
-    
-    // Set splitRatio visibility
-    updateSettingsVisibility();
+    if (btnFirma) btnFirma.removeAttribute('disabled');
     
     console.log('[DEBUG] Interfaz habilitada para el archivo cargado.');
   }
@@ -633,46 +640,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (settingsSection) settingsSection.classList.remove('active');
     
-    conversionModeRadios.forEach(radio => {
-      radio.setAttribute('disabled', 'true');
-      if (radio.value === 'combine') radio.checked = true;
-    });
-    
-    if (splitRatioSlider) splitRatioSlider.setAttribute('disabled', 'true');
-    if (marginSlider) marginSlider.setAttribute('disabled', 'true');
-    if (drawDividerCheckbox) drawDividerCheckbox.setAttribute('disabled', 'true');
-    
-    if (cropTopSlider) cropTopSlider.setAttribute('disabled', 'true');
-    if (cropBottomSlider) cropBottomSlider.setAttribute('disabled', 'true');
-    if (cropLeftSlider) cropLeftSlider.setAttribute('disabled', 'true');
-    
     if (btnConvert) btnConvert.setAttribute('disabled', 'true');
-    
-    // Reset values to defaults
-    if (splitRatioSlider) {
-      splitRatioSlider.value = 50;
-      splitRatioValue.textContent = '50%';
-    }
-    if (marginSlider) {
-      marginSlider.value = 8;
-      marginValue.textContent = '8pt (~2.8mm)';
-    }
-    if (drawDividerCheckbox) drawDividerCheckbox.checked = true;
-    
-    if (cropTopSlider) {
-      cropTopSlider.value = 0;
-      cropTopValue.textContent = '0pt';
-    }
-    if (cropBottomSlider) {
-      cropBottomSlider.value = 80;
-      cropBottomValue.textContent = '80pt';
-    }
-    if (cropLeftSlider) {
-      cropLeftSlider.value = 20;
-      cropLeftValue.textContent = '20pt';
-    }
-    
-    updateSettingsVisibility();
+    if (btnFirma) btnFirma.setAttribute('disabled', 'true');
 
     // Clear previews
     if (convertedPdfUrl) {
@@ -681,41 +650,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (pdfPreviewIframe) pdfPreviewIframe.src = '';
     if (previewIframeContainer) previewIframeContainer.classList.add('hidden');
-    if (previewActions) previewActions.classList.add('hidden');
+    if (previewActions) {
+      previewActions.classList.add('hidden');
+      previewActions.style.removeProperty('display');
+    }
     if (previewPlaceholder) previewPlaceholder.classList.remove('hidden');
-  }
-
-  // --- Controls Interaction ---
-  
-  if (splitRatioSlider) {
-    splitRatioSlider.addEventListener('input', (e) => {
-      splitRatioValue.textContent = `${e.target.value}%`;
-    });
-  }
-
-  if (marginSlider) {
-    marginSlider.addEventListener('input', (e) => {
-      const mm = (parseFloat(e.target.value) * 0.352778).toFixed(1);
-      marginValue.textContent = `${e.target.value}pt (~${mm}mm)`;
-    });
-  }
-
-  if (cropTopSlider) {
-    cropTopSlider.addEventListener('input', (e) => {
-      cropTopValue.textContent = `${e.target.value}pt`;
-    });
-  }
-
-  if (cropBottomSlider) {
-    cropBottomSlider.addEventListener('input', (e) => {
-      cropBottomValue.textContent = `${e.target.value}pt`;
-    });
-  }
-
-  if (cropLeftSlider) {
-    cropLeftSlider.addEventListener('input', (e) => {
-      cropLeftValue.textContent = `${e.target.value}pt`;
-    });
   }
 
   // --- Conversion Request ---
@@ -732,17 +671,16 @@ document.addEventListener('DOMContentLoaded', () => {
       
       const formData = new FormData();
       formData.append('file', uploadedFile);
-      formData.append('mode', getSelectedMode());
-      const ratioVal = (parseFloat(splitRatioSlider.value) / 100).toString();
-      formData.append('splitRatio', ratioVal);
-      formData.append('margin', marginSlider.value);
-      formData.append('drawDivider', drawDividerCheckbox.checked.toString());
+      formData.append('mode', 'combine');
+      formData.append('splitRatio', '0.5');
+      formData.append('margin', '8');
+      formData.append('drawDivider', 'true');
       
       // Add crop values
-      formData.append('cropTop', cropTopSlider.value);
-      formData.append('cropBottom', cropBottomSlider.value);
-      formData.append('cropLeft', cropLeftSlider.value);
-      formData.append('cropRight', cropLeftSlider.value);
+      formData.append('cropTop', '0');
+      formData.append('cropBottom', '80');
+      formData.append('cropLeft', '20');
+      formData.append('cropRight', '20');
 
       try {
         const response = await fetch('/api/convert', {
@@ -775,7 +713,9 @@ document.addEventListener('DOMContentLoaded', () => {
         
         previewPlaceholder.classList.add('hidden');
         previewIframeContainer.classList.remove('hidden');
-        previewActions.classList.remove('hidden');
+        if (previewActions) {
+          previewActions.classList.remove('hidden');
+        }
         console.log('[DEBUG] Conversión completada con éxito.');
         
       } catch (error) {
@@ -785,6 +725,77 @@ document.addEventListener('DOMContentLoaded', () => {
         btnConvert.removeAttribute('disabled');
         if (btnText) btnText.style.opacity = '1';
         if (btnLoader) btnLoader.classList.add('hidden');
+      }
+    });
+  }
+
+  if (btnFirma) {
+    btnFirma.addEventListener('click', async () => {
+      console.log('[DEBUG] Iniciando conversión para Firma...');
+      if (!uploadedFile) return;
+
+      // Show loading state
+      btnFirma.setAttribute('disabled', 'true');
+      if (btnConvert) btnConvert.setAttribute('disabled', 'true');
+      btnFirma.style.opacity = '0.5';
+
+      const formData = new FormData();
+      formData.append('file', uploadedFile);
+      formData.append('mode', 'combine');
+      formData.append('splitRatio', '0.5');
+      formData.append('margin', '8');
+      formData.append('drawDivider', 'false');
+      formData.append('onlyFirstPage', 'true');
+
+      // Add crop values
+      formData.append('cropTop', '0');
+      formData.append('cropBottom', '80');
+      formData.append('cropLeft', '20');
+      formData.append('cropRight', '20');
+
+      try {
+        const response = await fetch('/api/convert', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (response.status === 401) {
+          alert('Tu sesión ha expirado. Por favor ingresa de nuevo.');
+          showLogin();
+          return;
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || 'Error procesando el archivo.');
+        }
+
+        const pdfBlob = await response.blob();
+
+        if (convertedPdfUrl) {
+          URL.revokeObjectURL(convertedPdfUrl);
+        }
+
+        convertedPdfUrl = URL.createObjectURL(pdfBlob);
+        pdfPreviewIframe.src = convertedPdfUrl;
+
+        btnDownload.href = convertedPdfUrl;
+        btnDownload.download = `firma_${uploadedFile.name}`;
+
+        previewPlaceholder.classList.add('hidden');
+        previewIframeContainer.classList.remove('hidden');
+        if (previewActions) {
+          previewActions.classList.remove('hidden');
+        }
+        console.log('[DEBUG] Conversión para Firma completada con éxito.');
+
+      } catch (error) {
+        console.error(error);
+        alert(`Error al generar vista para firma: ${error.message}`);
+      } finally {
+        btnFirma.removeAttribute('disabled');
+        if (btnConvert) btnConvert.removeAttribute('disabled');
+        btnFirma.style.opacity = '1';
       }
     });
   }

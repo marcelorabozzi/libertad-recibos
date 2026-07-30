@@ -1,0 +1,26 @@
+{
+  "showConvertButton": false,
+  "showSignatureButton": true,
+  "signature": {
+    "employee": {
+      "text": "Firma Empleador",
+      "textX": 290,
+      "textY": 56,
+      "fontSize": 7,
+      "lineLength": 120,
+      "lineX": 255,
+      "lineY": 65
+    },
+    "divider": {
+      "height": 116,
+      "x": 250,
+      "y": 51
+    },
+    "box": {
+      "width": 8,
+      "height": 8,
+      "x": 483,
+      "y": 55
+    }
+  }
+}

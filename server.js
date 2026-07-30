@@ -4,7 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { PDFDocument, rgb } = require('pdf-lib');
+const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -22,14 +22,48 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Almacenamiento de sesiones en memoria
-const sessions = new Map();
+// Almacenamiento de sesiones con persistencia en archivo
+const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
+
+function loadSessions() {
+  try {
+    if (fs.existsSync(SESSIONS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+      const map = new Map();
+      for (const [key, val] of Object.entries(data)) {
+        if (Date.now() < val.expiresAt) {
+          map.set(key, val);
+        }
+      }
+      return map;
+    }
+  } catch (error) {
+    console.error('Error al cargar sesiones:', error);
+  }
+  return new Map();
+}
+
+function saveSessions(map) {
+  try {
+    const obj = {};
+    for (const [key, val] of map.entries()) {
+      if (Date.now() < val.expiresAt) {
+        obj[key] = val;
+      }
+    }
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Error al guardar sesiones:', error);
+  }
+}
+
+const sessions = loadSessions();
 
 // Helper para parsear cookies manualmente sin dependencias adicionales
 function getSessionFromCookie(req) {
   const cookieHeader = req.headers.cookie;
   if (!cookieHeader) return null;
-  
+
   const cookies = cookieHeader.split(';').reduce((acc, c) => {
     const parts = c.trim().split('=');
     const key = parts[0];
@@ -47,6 +81,7 @@ function getSessionFromCookie(req) {
   // Verificar si la sesión expiró
   if (Date.now() > session.expiresAt) {
     sessions.delete(token);
+    saveSessions(sessions);
     return null;
   }
 
@@ -71,7 +106,41 @@ function adminOnly(req, res, next) {
   next();
 }
 
+// --- Helper de Configuración ---
+
+function getConfig() {
+  try {
+    const configFile = path.join(__dirname, 'config.json');
+    if (fs.existsSync(configFile)) {
+      return JSON.parse(fs.readFileSync(configFile, 'utf8'));
+    }
+  } catch (error) {
+    console.error('Error al leer config.json:', error);
+  }
+  return { showConvertButton: true, showSignatureButton: true };
+}
+
+// Endpoint para obtener la configuración general
+app.get('/api/config', (req, res) => {
+  res.json(getConfig());
+});
+
+// Endpoint para obtener la versión del sistema
+app.get('/api/version', (req, res) => {
+  try {
+    const versionFile = path.join(__dirname, 'version.json');
+    if (fs.existsSync(versionFile)) {
+      const versionData = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
+      return res.json(versionData);
+    }
+  } catch (error) {
+    console.error('Error al leer version.json:', error);
+  }
+  res.status(500).json({ error: 'Error al obtener la versión del sistema' });
+});
+
 // --- Endpoints de Autenticación ---
+
 
 // Obtener datos del usuario logueado
 app.get('/api/me', (req, res) => {
@@ -109,7 +178,7 @@ app.post('/api/login', (req, res) => {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
     }
 
-    // Crear sesión en memoria
+    // Crear sesión y guardar en disco
     const token = crypto.randomUUID();
     sessions.set(token, {
       username: username.toLowerCase(),
@@ -117,6 +186,7 @@ app.post('/api/login', (req, res) => {
       displayName: user.displayName,
       expiresAt: Date.now() + 24 * 60 * 60 * 1000 // Expira en 24h
     });
+    saveSessions(sessions);
 
     // Enviar cookie HTTP-Only firma de seguridad
     res.setHeader('Set-Cookie', `session_token=${token}; HttpOnly; Path=/; Max-Age=86400; SameSite=Strict`);
@@ -147,6 +217,7 @@ app.post('/api/logout', (req, res) => {
     const token = cookies['session_token'];
     if (token) {
       sessions.delete(token);
+      saveSessions(sessions);
     }
   }
 
@@ -162,14 +233,14 @@ app.get('/api/admin/users', authRequired, adminOnly, (req, res) => {
   try {
     const usersFile = path.join(__dirname, 'users.json');
     const usersData = JSON.parse(fs.readFileSync(usersFile, 'utf8'));
-    
+
     const userList = Object.keys(usersData).map(username => ({
       username,
       displayName: usersData[username].displayName,
       role: usersData[username].role,
       password: usersData[username].password
     }));
-    
+
     res.json(userList);
   } catch (error) {
     res.status(500).json({ error: 'Error al leer usuarios: ' + error.message });
@@ -179,11 +250,11 @@ app.get('/api/admin/users', authRequired, adminOnly, (req, res) => {
 // Crear un nuevo usuario
 app.post('/api/admin/users', authRequired, adminOnly, (req, res) => {
   const { username, password, displayName, role } = req.body;
-  
+
   if (!username || !password || !displayName || !role) {
     return res.status(400).json({ error: 'Todos los campos son requeridos.' });
   }
-  
+
   const normalizedUsername = username.trim().toLowerCase();
   if (normalizedUsername === '') {
     return res.status(400).json({ error: 'Nombre de usuario inválido.' });
@@ -192,17 +263,17 @@ app.post('/api/admin/users', authRequired, adminOnly, (req, res) => {
   try {
     const usersFile = path.join(__dirname, 'users.json');
     const usersData = JSON.parse(fs.readFileSync(usersFile, 'utf8'));
-    
+
     if (usersData[normalizedUsername]) {
       return res.status(400).json({ error: 'El usuario ya existe.' });
     }
-    
+
     usersData[normalizedUsername] = {
       password,
       role,
       displayName
     };
-    
+
     fs.writeFileSync(usersFile, JSON.stringify(usersData, null, 2), 'utf8');
     res.json({ success: true });
   } catch (error) {
@@ -229,7 +300,7 @@ app.put('/api/admin/users/:username/password', authRequired, adminOnly, (req, re
     }
 
     usersData[normalizedUsername].password = password;
-    
+
     fs.writeFileSync(usersFile, JSON.stringify(usersData, null, 2), 'utf8');
     res.json({ success: true });
   } catch (error) {
@@ -255,7 +326,7 @@ app.delete('/api/admin/users/:username', authRequired, adminOnly, (req, res) => 
     }
 
     delete usersData[normalizedUsername];
-    
+
     fs.writeFileSync(usersFile, JSON.stringify(usersData, null, 2), 'utf8');
     res.json({ success: true });
   } catch (error) {
@@ -283,7 +354,7 @@ app.put('/api/users/me/password', authRequired, (req, res) => {
     }
 
     usersData[username].password = password;
-    
+
     fs.writeFileSync(usersFile, JSON.stringify(usersData, null, 2), 'utf8');
     res.json({ success: true });
   } catch (error) {
@@ -299,6 +370,7 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
   const splitRatio = parseFloat(options.splitRatio) || 0.5;
   const margin = parseFloat(options.margin) !== undefined ? parseFloat(options.margin) : 14.17; // Margen de página de destino (~5mm)
   const drawDivider = options.drawDivider === 'true' || options.drawDivider === true;
+  const onlyFirstPage = options.onlyFirstPage === 'true' || options.onlyFirstPage === true;
 
   // Recortes de los márgenes blancos del archivo original
   const cropTop = parseFloat(options.cropTop) || 0;
@@ -310,12 +382,132 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
   const destDoc = await PDFDocument.create();
   const pages = srcDoc.getPages();
 
+  // Caso especial: Una sola página en disposición vertical (para Firma)
+  if (onlyFirstPage) {
+    const page = pages[0];
+    const size = page.getSize();
+
+    // Dimensiones fijas de A4 Portrait (vertical)
+    const destWidth = 595.275;
+    const destHeight = 841.89;
+
+    const destPage = destDoc.addPage([destWidth, destHeight]);
+
+    const availWidth = destWidth - 2 * margin;
+    const availHeight = destHeight - 2 * margin;
+
+    const effectiveWidth = size.width - cropLeft - cropRight;
+    const effectiveHeight = size.height - cropTop - cropBottom;
+
+    const scale_w = availWidth / effectiveWidth;
+    const scale_h = availHeight / effectiveHeight;
+    const scale = Math.min(scale_w, scale_h);
+
+    const drawnWidth = effectiveWidth * scale;
+    const drawnHeight = effectiveHeight * scale;
+
+    const x = margin + (availWidth - drawnWidth) / 2;
+    const y = margin + (availHeight - drawnHeight) / 2;
+
+    const embeddedPage = await destDoc.embedPage(page, {
+      left: cropLeft,
+      bottom: cropBottom,
+      right: size.width - cropRight,
+      top: size.height - cropTop
+    });
+
+    destPage.drawPage(embeddedPage, {
+      x,
+      y,
+      width: drawnWidth,
+      height: drawnHeight
+    });
+
+    // DUPLICAR LUGAR DE FIRMA:
+    // Obtener configuración dinámica
+    const config = getConfig();
+    const sigConfig = config.signature || {};
+    const empConfig = sigConfig.employee || {};
+
+    const divConfig = sigConfig.divider || {};
+    const boxConfig = sigConfig.box || {};
+
+    const lineLengthVal = empConfig.lineLength !== undefined ? parseFloat(empConfig.lineLength) : 120;
+    const lineXVal = empConfig.lineX !== undefined ? parseFloat(empConfig.lineX) : 255;
+    const lineYVal = empConfig.lineY !== undefined ? parseFloat(empConfig.lineY) : 65;
+    const textXVal = empConfig.textX !== undefined ? parseFloat(empConfig.textX) : 490;
+    const textYVal = empConfig.textY !== undefined ? parseFloat(empConfig.textY) : 56;
+    const fontSizeVal = empConfig.fontSize !== undefined ? parseFloat(empConfig.fontSize) : 7;
+    const employeeText = empConfig.text || 'Firma Empleado';
+
+    const vLineHeightVal = divConfig.height !== undefined ? parseFloat(divConfig.height) : 0;
+    const vLineXVal = divConfig.x !== undefined ? parseFloat(divConfig.x) : 0;
+    const vLineYVal = divConfig.y !== undefined ? parseFloat(divConfig.y) : 0;
+
+    const boxWidthVal = boxConfig.width !== undefined ? parseFloat(boxConfig.width) : 0;
+    const boxHeightVal = boxConfig.height !== undefined ? parseFloat(boxConfig.height) : 0;
+    const boxXVal = boxConfig.x !== undefined ? parseFloat(boxConfig.x) : 0;
+    const boxYVal = boxConfig.y !== undefined ? parseFloat(boxConfig.y) : 0;
+
+    // 0. Dibujar el rectángulo blanco de fondo opcional (para tapar áreas del recibo original)
+    if (boxWidthVal > 0 && boxHeightVal > 0) {
+      destPage.drawRectangle({
+        x: x + boxXVal * scale,
+        y: y + boxYVal * scale,
+        width: boxWidthVal * scale,
+        height: boxHeightVal * scale,
+        color: rgb(1, 1, 1), // Blanco
+      });
+    }
+
+    // 1. Dibujar la línea horizontal para la firma del empleado
+    const xStart = x + lineXVal * scale;
+    const xEnd = xStart + lineLengthVal * scale;
+    const yLine = y + lineYVal * scale;
+
+    destPage.drawLine({
+      start: { x: xStart, y: yLine },
+      end: { x: xEnd, y: yLine },
+      thickness: 0.75,
+      color: rgb(0, 0, 0),
+    });
+
+    // 2. Escribir el texto "Firma Empleado"
+    const helveticaFont = await destDoc.embedFont(StandardFonts.Helvetica);
+    const textX = x + textXVal * scale;
+    const textY = y + textYVal * scale;
+
+    destPage.drawText(employeeText, {
+      x: textX,
+      y: textY,
+      size: fontSizeVal,
+      font: helveticaFont,
+      color: rgb(0, 0, 0),
+    });
+
+    // 3. Dibujar la línea vertical opcional
+    if (vLineHeightVal > 0) {
+      const vX = x + vLineXVal * scale;
+      const vYStart = y + vLineYVal * scale;
+      const vYEnd = vYStart + vLineHeightVal * scale;
+
+      destPage.drawLine({
+        start: { x: vX, y: vYStart },
+        end: { x: vX, y: vYEnd },
+        thickness: 0.75,
+        color: rgb(0, 0, 0),
+      });
+    }
+
+    return await destDoc.save();
+  }
+
   // Dimensiones fijas de A4 Landscape
   const destWidth = 841.89;
   const destHeight = 595.275;
 
   // Separación de 0.5 cm entre las dos copias
-  const gap = 14.17; 
+  const gap = 14.17;
 
   if (mode === 'combine') {
     // MODO COMBINAR: Junta Pág 1 (Original) y Pág 2 (Copia) una al lado de la otra
@@ -506,7 +698,7 @@ app.post('/api/convert', authRequired, upload.single('file'), async (req, res) =
       return res.status(400).json({ error: 'No se subió ningún archivo PDF.' });
     }
 
-    const { mode, splitRatio, margin, drawDivider, cropTop, cropBottom, cropLeft, cropRight } = req.body;
+    const { mode, splitRatio, margin, drawDivider, cropTop, cropBottom, cropLeft, cropRight, onlyFirstPage } = req.body;
 
     const outputPdfBytes = await convertVerticalToHorizontal(req.file.buffer, {
       mode: mode || 'combine',
@@ -516,7 +708,8 @@ app.post('/api/convert', authRequired, upload.single('file'), async (req, res) =
       cropTop: cropTop ? parseFloat(cropTop) : 0,
       cropBottom: cropBottom ? parseFloat(cropBottom) : 0,
       cropLeft: cropLeft ? parseFloat(cropLeft) : 0,
-      cropRight: cropRight ? parseFloat(cropRight) : 0
+      cropRight: cropRight ? parseFloat(cropRight) : 0,
+      onlyFirstPage: onlyFirstPage
     });
 
     res.setHeader('Content-Type', 'application/pdf');
