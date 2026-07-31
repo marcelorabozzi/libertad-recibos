@@ -44,6 +44,33 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnDownload = document.getElementById('btnDownload');
   const btnFirma = document.getElementById('btnFirma');
 
+  // Batch Mode - Elementos
+  const btnTabSingle = document.getElementById('btnTabSingle');
+  const btnTabBatch = document.getElementById('btnTabBatch');
+  const singleFileContainer = document.getElementById('singleFileContainer');
+  const batchFileContainer = document.getElementById('batchFileContainer');
+  
+  const singlePreviewHeader = document.getElementById('singlePreviewHeader');
+  const batchPreviewHeader = document.getElementById('batchPreviewHeader');
+  const singlePreviewContainer = document.getElementById('singlePreviewContainer');
+  const batchProgressContainer = document.getElementById('batchProgressContainer');
+  
+  const batchDirectoryPath = document.getElementById('batchDirectoryPath');
+  const batchSubDirName = document.getElementById('batchSubDirName');
+  const btnBatchConvert = document.getElementById('btnBatchConvert');
+  const btnBatchFirma = document.getElementById('btnBatchFirma');
+  const btnSelectDirectory = document.getElementById('btnSelectDirectory');
+  
+  const batchProcessedCount = document.getElementById('batchProcessedCount');
+  const batchTotalCount = document.getElementById('batchTotalCount');
+  const batchReceiptsCount = document.getElementById('batchReceiptsCount');
+  const batchSuccessCount = document.getElementById('batchSuccessCount');
+  const batchErrorCount = document.getElementById('batchErrorCount');
+  
+  const batchProgressBarFill = document.getElementById('batchProgressBarFill');
+  const batchProgressPct = document.getElementById('batchProgressPct');
+  const batchFilesList = document.getElementById('batchFilesList');
+
   // Administración de Usuarios - Elementos
   const usersTableBody = document.getElementById('usersTableBody');
   const createUserForm = document.getElementById('createUserForm');
@@ -67,6 +94,16 @@ document.addEventListener('DOMContentLoaded', () => {
     await fetchConfig();
     await fetchVersion();
     await checkSession();
+    
+    // Cargar último directorio guardado
+    try {
+      const savedDir = localStorage.getItem('lastSelectedDirectory');
+      if (savedDir && batchDirectoryPath) {
+        batchDirectoryPath.value = savedDir;
+      }
+    } catch (e) {
+      console.error('Error al cargar el último directorio de localStorage:', e);
+    }
   }
 
   async function fetchVersion() {
@@ -112,6 +149,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
+    if (btnBatchConvert) {
+      if (hideConvert) {
+        btnBatchConvert.style.setProperty('display', 'none', 'important');
+        btnBatchConvert.classList.add('hidden');
+      } else {
+        btnBatchConvert.style.removeProperty('display');
+        btnBatchConvert.classList.remove('hidden');
+      }
+    }
+
     // Controlar botón de firma
     const hideSignature = appConfig.showSignatureButton === false || String(appConfig.showSignatureButton) === 'false';
     if (btnFirma) {
@@ -123,6 +170,16 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('[DEBUG] Mostrando botón de firma');
         btnFirma.style.removeProperty('display');
         btnFirma.classList.remove('hidden');
+      }
+    }
+
+    if (btnBatchFirma) {
+      if (hideSignature) {
+        btnBatchFirma.style.setProperty('display', 'none', 'important');
+        btnBatchFirma.classList.add('hidden');
+      } else {
+        btnBatchFirma.style.removeProperty('display');
+        btnBatchFirma.classList.remove('hidden');
       }
     }
   }
@@ -734,6 +791,9 @@ document.addEventListener('DOMContentLoaded', () => {
       console.log('[DEBUG] Iniciando conversión para Firma...');
       if (!uploadedFile) return;
 
+      // Cargar la configuración dinámica antes de procesar
+      await fetchConfig();
+
       // Show loading state
       btnFirma.setAttribute('disabled', 'true');
       if (btnConvert) btnConvert.setAttribute('disabled', 'true');
@@ -798,6 +858,246 @@ document.addEventListener('DOMContentLoaded', () => {
         btnFirma.style.opacity = '1';
       }
     });
+  }
+
+  // --- Manejo del cambio de pestañas de modo ---
+  if (btnTabSingle && btnTabBatch) {
+    btnTabSingle.addEventListener('click', () => {
+      btnTabSingle.classList.add('active');
+      btnTabBatch.classList.remove('active');
+      
+      singleFileContainer.classList.remove('hidden');
+      batchFileContainer.classList.add('hidden');
+      
+      singlePreviewHeader.classList.remove('hidden');
+      singlePreviewContainer.classList.remove('hidden');
+      batchPreviewHeader.classList.add('hidden');
+      batchProgressContainer.classList.add('hidden');
+    });
+
+    btnTabBatch.addEventListener('click', () => {
+      btnTabBatch.classList.add('active');
+      btnTabSingle.classList.remove('active');
+      
+      singleFileContainer.classList.add('hidden');
+      batchFileContainer.classList.remove('hidden');
+      
+      singlePreviewHeader.classList.add('hidden');
+      singlePreviewContainer.classList.add('hidden');
+      batchPreviewHeader.classList.remove('hidden');
+      batchProgressContainer.classList.remove('hidden');
+    });
+  }
+
+  // --- Lógica del Procesamiento por Lote ---
+  if (btnBatchConvert) {
+    btnBatchConvert.addEventListener('click', () => handleBatchProcess('convert'));
+  }
+  if (btnBatchFirma) {
+    btnBatchFirma.addEventListener('click', () => handleBatchProcess('signature'));
+  }
+
+  if (btnSelectDirectory) {
+    btnSelectDirectory.addEventListener('click', async () => {
+      console.log('[DEBUG] Solicitando diálogo nativo de selección de directorio...');
+      
+      const originalText = btnSelectDirectory.textContent;
+      
+      // Deshabilitar botón y cambiar el estado
+      btnSelectDirectory.setAttribute('disabled', 'true');
+      btnSelectDirectory.textContent = 'Abriendo...';
+      if (batchDirectoryPath) {
+        batchDirectoryPath.placeholder = 'Seleccione una carpeta en el diálogo nativo de Windows...';
+      }
+
+      try {
+        const response = await fetch('/api/browse-directory');
+        
+        if (response.status === 401) {
+          alert('Tu sesión ha expirado. Por favor ingresa de nuevo.');
+          showLogin();
+          return;
+        }
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || 'No se pudo abrir el diálogo.');
+        }
+
+        if (data.selectedPath) {
+          console.log('[DEBUG] Ruta seleccionada:', data.selectedPath);
+          batchDirectoryPath.value = data.selectedPath;
+          localStorage.setItem('lastSelectedDirectory', data.selectedPath);
+        } else {
+          console.log('[DEBUG] Selección cancelada por el usuario.');
+        }
+      } catch (error) {
+        console.error('Error al invocar el selector de carpetas:', error);
+        alert(`Error al abrir el selector de carpetas: ${error.message}`);
+      } finally {
+        // Restaurar estado del botón e input
+        btnSelectDirectory.removeAttribute('disabled');
+        btnSelectDirectory.textContent = originalText;
+        if (batchDirectoryPath) {
+          batchDirectoryPath.placeholder = 'Ej: D:\\MisRecibos';
+        }
+      }
+    });
+  }
+
+  if (batchDirectoryPath) {
+    batchDirectoryPath.addEventListener('input', () => {
+      localStorage.setItem('lastSelectedDirectory', batchDirectoryPath.value.trim());
+    });
+  }
+
+  async function handleBatchProcess(action) {
+    const dirPath = batchDirectoryPath.value.trim();
+    const subDir = batchSubDirName.value.trim() || 'procesados';
+
+    if (!dirPath) {
+      alert('Por favor, ingrese la ruta de la carpeta local.');
+      batchDirectoryPath.focus();
+      return;
+    }
+
+    console.log(`[DEBUG] Iniciando procesamiento por lote (${action}) para:`, dirPath);
+
+    // Cargar la configuración dinámica antes de procesar
+    await fetchConfig();
+
+    // Determinar qué botón y loader usar
+    const activeBtn = action === 'convert' ? btnBatchConvert : btnBatchFirma;
+    const otherBtn = action === 'convert' ? btnBatchFirma : btnBatchConvert;
+
+    const btnTextElem = activeBtn.querySelector('.btn-text');
+    const btnLoaderElem = activeBtn.querySelector('.btn-loader');
+
+    // Deshabilitar controles y mostrar cargando
+    activeBtn.setAttribute('disabled', 'true');
+    if (otherBtn) otherBtn.setAttribute('disabled', 'true');
+    if (btnTextElem) btnTextElem.style.opacity = '0.5';
+    if (btnLoaderElem) btnLoaderElem.classList.remove('hidden');
+
+    // Resetear contadores y barra de progreso en UI
+    batchProcessedCount.textContent = '0';
+    batchTotalCount.textContent = '0';
+    if (batchReceiptsCount) batchReceiptsCount.textContent = '0';
+    batchSuccessCount.textContent = '0';
+    batchErrorCount.textContent = '0';
+    batchProgressBarFill.style.width = '0%';
+    batchProgressPct.textContent = '0% completado';
+    batchFilesList.innerHTML = '<div class="batch-empty-state">Escaneando y procesando archivos en la carpeta...</div>';
+
+    try {
+      const response = await fetch('/api/convert-batch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          directoryPath: dirPath,
+          subDirName: subDir,
+          // Opciones preestablecidas de conversión
+          mode: 'combine',
+          splitRatio: 0.5,
+          margin: 8,
+          drawDivider: action === 'convert',
+          cropTop: 0,
+          cropBottom: 80,
+          cropLeft: 20,
+          cropRight: 20,
+          onlyFirstPage: action !== 'convert'
+        })
+      });
+
+      if (response.status === 401) {
+        alert('Tu sesión ha expirado. Por favor ingresa de nuevo.');
+        showLogin();
+        return;
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Error procesando el lote de archivos.');
+      }
+
+      console.log('[DEBUG] Procesamiento por lote finalizado. Respuesta:', data);
+
+      // Actualizar contadores
+      batchProcessedCount.textContent = data.processedCount || '0';
+      batchTotalCount.textContent = data.processedCount || '0';
+      if (batchReceiptsCount) batchReceiptsCount.textContent = data.totalReceiptsCount || '0';
+      batchSuccessCount.textContent = data.successCount || '0';
+      batchErrorCount.textContent = data.errorCount || '0';
+      
+      // Completar barra de progreso
+      batchProgressBarFill.style.width = '100%';
+      batchProgressPct.textContent = '100% completado';
+
+      // Renderizar listado de archivos procesados
+      batchFilesList.innerHTML = '';
+      if (!data.results || data.results.length === 0) {
+        batchFilesList.innerHTML = '<div class="batch-empty-state">No se encontraron archivos PDF para procesar en el directorio.</div>';
+        alert('No se encontraron archivos PDF en la carpeta indicada.');
+        return;
+      }
+
+      data.results.forEach(res => {
+        const item = document.createElement('div');
+        item.className = 'batch-file-item';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'batch-file-name';
+        nameSpan.textContent = res.file;
+        nameSpan.title = res.file;
+        item.appendChild(nameSpan);
+
+        if (res.status === 'success' && res.receiptCount !== undefined) {
+          const receiptsSpan = document.createElement('span');
+          receiptsSpan.className = 'batch-file-name';
+          receiptsSpan.style.fontSize = '0.8rem';
+          receiptsSpan.style.color = 'var(--text-secondary)';
+          receiptsSpan.style.marginLeft = '0.5rem';
+          receiptsSpan.textContent = `(${res.receiptCount} ${res.receiptCount === 1 ? 'recibo' : 'recibos'})`;
+          item.appendChild(receiptsSpan);
+        }
+
+        const statusDiv = document.createElement('div');
+        statusDiv.className = 'batch-file-status';
+
+        const badge = document.createElement('span');
+        badge.className = `status-badge ${res.status === 'success' ? 'status-success' : 'status-error'}`;
+        badge.textContent = res.status === 'success' ? 'Éxito' : 'Error';
+        statusDiv.appendChild(badge);
+
+        if (res.status !== 'success' && res.message) {
+          const errMsg = document.createElement('span');
+          errMsg.style.fontSize = '0.7rem';
+          errMsg.style.color = 'var(--text-error)';
+          errMsg.style.marginLeft = '0.25rem';
+          errMsg.textContent = `(${res.message})`;
+          statusDiv.appendChild(errMsg);
+        }
+
+        item.appendChild(statusDiv);
+        batchFilesList.appendChild(item);
+      });
+
+      alert(`Procesamiento por lote finalizado.\n\nTotal archivos: ${data.processedCount}\nExitosos: ${data.successCount}\nFallidos: ${data.errorCount}\nTotal recibos procesados: ${data.totalReceiptsCount || 0}\n\nLos archivos resultantes se guardaron en:\n${data.outputDirectory}`);
+
+    } catch (error) {
+      console.error(error);
+      batchFilesList.innerHTML = `<div class="batch-empty-state" style="color: var(--text-error); font-weight: 600;">Error: ${error.message}</div>`;
+      alert(`Error al procesar el lote: ${error.message}`);
+    } finally {
+      // Restaurar estado de los botones
+      activeBtn.removeAttribute('disabled');
+      if (otherBtn) otherBtn.removeAttribute('disabled');
+      if (btnTextElem) btnTextElem.style.opacity = '1';
+      if (btnLoaderElem) btnLoaderElem.classList.add('hidden');
+    }
   }
 
   // Helper function to format file sizes

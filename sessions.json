@@ -1,8 +1,8 @@
 {
-  "fbf22d1d-8cc2-4da8-b363-d74d08e0708c": {
-    "username": "root",
-    "role": "root",
-    "displayName": "Administrador Root",
-    "expiresAt": 1785502832540
+  "e11634f2-a675-4edc-928a-c7da2cf7be5b": {
+    "username": "libertad",
+    "role": "operador",
+    "displayName": "Operador libertad",
+    "expiresAt": 1785609926053
   }
 }

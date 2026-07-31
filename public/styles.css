@@ -1010,3 +1010,235 @@ iframe {
   padding-top: 1.25rem;
   margin-top: auto;
 }
+
+/* --- ESTILOS DE MODO Y PROCESAMIENTO POR LOTES --- */
+
+/* Tabs de modo */
+.tabs-mode {
+  display: flex;
+  background: var(--bg-tertiary);
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  margin-bottom: 1.5rem;
+  width: 100%;
+}
+
+.tab-mode-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 0.5rem;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: calc(var(--radius-sm) - 2px);
+  transition: var(--transition);
+}
+
+.tab-mode-btn:hover {
+  color: var(--text-main);
+}
+
+.tab-mode-btn.active {
+  background: var(--bg-secondary);
+  color: var(--accent-cyan);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Input para procesamiento en lote */
+.styled-input-batch {
+  width: 100%;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  outline: none;
+  transition: var(--transition);
+}
+
+.styled-input-batch:focus {
+  border-color: var(--accent-cyan);
+  background-color: var(--bg-secondary);
+}
+
+/* Contenedor del lote */
+.batch-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  flex: 1;
+  width: 100%;
+}
+
+.batch-summary-card {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+.batch-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.metric-value {
+  font-family: var(--font-title);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.2;
+}
+
+.metric-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
+  width: 0%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-percentage-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: right;
+  margin-top: -0.5rem;
+}
+
+.batch-list-wrapper {
+  flex: 1;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  display: flex;
+  flex-direction: column;
+  min-height: 250px;
+  max-height: 350px;
+  overflow: hidden;
+}
+
+.batch-list-header {
+  padding: 0.75rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.batch-files-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.batch-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 2rem;
+}
+
+.batch-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  font-size: 0.8rem;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.batch-file-name {
+  font-weight: 500;
+  color: var(--text-main);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 70%;
+}
+
+.batch-file-status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+.status-badge {
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.status-success {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.status-pending {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+
+.status-error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+/* Alingment for input next to button */
+.input-with-button {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.input-with-button input {
+  flex: 1;
+}
+
+.input-with-button button {
+  flex-shrink: 0;
+}

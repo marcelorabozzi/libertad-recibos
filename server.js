@@ -4,6 +4,8 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { exec } = require('child_process');
+const zlib = require('zlib');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
 const app = express();
@@ -384,119 +386,184 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
 
   // Caso especial: Una sola página en disposición vertical (para Firma)
   if (onlyFirstPage) {
-    const page = pages[0];
-    const size = page.getSize();
+    for (let i = 0; i < pages.length; i += 2) {
+      const page = pages[i];
+      const size = page.getSize();
 
-    // Dimensiones fijas de A4 Portrait (vertical)
-    const destWidth = 595.275;
-    const destHeight = 841.89;
+      // Dimensiones fijas de A4 Portrait (vertical)
+      const destWidth = 595.275;
+      const destHeight = 841.89;
 
-    const destPage = destDoc.addPage([destWidth, destHeight]);
+      const destPage = destDoc.addPage([destWidth, destHeight]);
 
-    const availWidth = destWidth - 2 * margin;
-    const availHeight = destHeight - 2 * margin;
+      const availWidth = destWidth - 2 * margin;
+      const availHeight = destHeight - 2 * margin;
 
-    const effectiveWidth = size.width - cropLeft - cropRight;
-    const effectiveHeight = size.height - cropTop - cropBottom;
+      const effectiveWidth = size.width - cropLeft - cropRight;
+      const effectiveHeight = size.height - cropTop - cropBottom;
 
-    const scale_w = availWidth / effectiveWidth;
-    const scale_h = availHeight / effectiveHeight;
-    const scale = Math.min(scale_w, scale_h);
+      const scale_w = availWidth / effectiveWidth;
+      const scale_h = availHeight / effectiveHeight;
+      const scale = Math.min(scale_w, scale_h);
 
-    const drawnWidth = effectiveWidth * scale;
-    const drawnHeight = effectiveHeight * scale;
+      const drawnWidth = effectiveWidth * scale;
+      const drawnHeight = effectiveHeight * scale;
 
-    const x = margin + (availWidth - drawnWidth) / 2;
-    const y = margin + (availHeight - drawnHeight) / 2;
+      const x = margin + (availWidth - drawnWidth) / 2;
+      const y = margin + (availHeight - drawnHeight) / 2;
 
-    const embeddedPage = await destDoc.embedPage(page, {
-      left: cropLeft,
-      bottom: cropBottom,
-      right: size.width - cropRight,
-      top: size.height - cropTop
-    });
-
-    destPage.drawPage(embeddedPage, {
-      x,
-      y,
-      width: drawnWidth,
-      height: drawnHeight
-    });
-
-    // DUPLICAR LUGAR DE FIRMA:
-    // Obtener configuración dinámica
-    const config = getConfig();
-    const sigConfig = config.signature || {};
-    const empConfig = sigConfig.employee || {};
-
-    const divConfig = sigConfig.divider || {};
-    const boxConfig = sigConfig.box || {};
-
-    const lineLengthVal = empConfig.lineLength !== undefined ? parseFloat(empConfig.lineLength) : 120;
-    const lineXVal = empConfig.lineX !== undefined ? parseFloat(empConfig.lineX) : 255;
-    const lineYVal = empConfig.lineY !== undefined ? parseFloat(empConfig.lineY) : 65;
-    const textXVal = empConfig.textX !== undefined ? parseFloat(empConfig.textX) : 490;
-    const textYVal = empConfig.textY !== undefined ? parseFloat(empConfig.textY) : 56;
-    const fontSizeVal = empConfig.fontSize !== undefined ? parseFloat(empConfig.fontSize) : 7;
-    const employeeText = empConfig.text || 'Firma Empleado';
-
-    const vLineHeightVal = divConfig.height !== undefined ? parseFloat(divConfig.height) : 0;
-    const vLineXVal = divConfig.x !== undefined ? parseFloat(divConfig.x) : 0;
-    const vLineYVal = divConfig.y !== undefined ? parseFloat(divConfig.y) : 0;
-
-    const boxWidthVal = boxConfig.width !== undefined ? parseFloat(boxConfig.width) : 0;
-    const boxHeightVal = boxConfig.height !== undefined ? parseFloat(boxConfig.height) : 0;
-    const boxXVal = boxConfig.x !== undefined ? parseFloat(boxConfig.x) : 0;
-    const boxYVal = boxConfig.y !== undefined ? parseFloat(boxConfig.y) : 0;
-
-    // 0. Dibujar el rectángulo blanco de fondo opcional (para tapar áreas del recibo original)
-    if (boxWidthVal > 0 && boxHeightVal > 0) {
-      destPage.drawRectangle({
-        x: x + boxXVal * scale,
-        y: y + boxYVal * scale,
-        width: boxWidthVal * scale,
-        height: boxHeightVal * scale,
-        color: rgb(1, 1, 1), // Blanco
+      const embeddedPage = await destDoc.embedPage(page, {
+        left: cropLeft,
+        bottom: cropBottom,
+        right: size.width - cropRight,
+        top: size.height - cropTop
       });
-    }
 
-    // 1. Dibujar la línea horizontal para la firma del empleado
-    const xStart = x + lineXVal * scale;
-    const xEnd = xStart + lineLengthVal * scale;
-    const yLine = y + lineYVal * scale;
+      destPage.drawPage(embeddedPage, {
+        x,
+        y,
+        width: drawnWidth,
+        height: drawnHeight
+      });
 
-    destPage.drawLine({
-      start: { x: xStart, y: yLine },
-      end: { x: xEnd, y: yLine },
-      thickness: 0.75,
-      color: rgb(0, 0, 0),
-    });
+      // Obtener configuración dinámica
+      const config = getConfig();
+      const sigConfig = config.signature || {};
+      const empConfig = sigConfig.employee || {};
 
-    // 2. Escribir el texto "Firma Empleado"
-    const helveticaFont = await destDoc.embedFont(StandardFonts.Helvetica);
-    const textX = x + textXVal * scale;
-    const textY = y + textYVal * scale;
+      const divConfig = sigConfig.divider || {};
+      const boxConfig = sigConfig.box || {};
 
-    destPage.drawText(employeeText, {
-      x: textX,
-      y: textY,
-      size: fontSizeVal,
-      font: helveticaFont,
-      color: rgb(0, 0, 0),
-    });
+      let lineLengthVal = empConfig.lineLength !== undefined ? parseFloat(empConfig.lineLength) : 120;
+      let lineXVal = empConfig.lineX !== undefined ? parseFloat(empConfig.lineX) : 255;
+      let lineYVal = empConfig.lineY !== undefined ? parseFloat(empConfig.lineY) : 65;
+      let textXVal = empConfig.textX !== undefined ? parseFloat(empConfig.textX) : 490;
+      let textYVal = empConfig.textY !== undefined ? parseFloat(empConfig.textY) : 56;
+      let fontSizeVal = empConfig.fontSize !== undefined ? parseFloat(empConfig.fontSize) : 7;
+      let employeeText = empConfig.text || 'Firma Empleado';
 
-    // 3. Dibujar la línea vertical opcional
-    if (vLineHeightVal > 0) {
-      const vX = x + vLineXVal * scale;
-      const vYStart = y + vLineYVal * scale;
-      const vYEnd = vYStart + vLineHeightVal * scale;
+      let vLineHeightVal = divConfig.height !== undefined ? parseFloat(divConfig.height) : 0;
+      let vLineXVal = divConfig.x !== undefined ? parseFloat(divConfig.x) : 0;
+      let vLineYVal = divConfig.y !== undefined ? parseFloat(divConfig.y) : 0;
+
+      let boxWidthVal = boxConfig.width !== undefined ? parseFloat(boxConfig.width) : 0;
+      let boxHeightVal = boxConfig.height !== undefined ? parseFloat(boxConfig.height) : 0;
+      let boxXVal = boxConfig.x !== undefined ? parseFloat(boxConfig.x) : 0;
+      let boxYVal = boxConfig.y !== undefined ? parseFloat(boxConfig.y) : 0;
+
+      // Intentar detectar la posición Y dinámica del cuadro de firma original de la derecha
+      let foundDynamicY = false;
+      let absTextY = 56; // Valor base predeterminado de textY
+      
+      try {
+        const contents = page.node.Contents();
+        if (contents) {
+          const ref = contents.size ? contents.get(0) : contents;
+          const resolved = srcDoc.context.lookup(ref);
+          if (resolved && (resolved.asUint8Array || resolved.getContentsString)) {
+            const bytes = resolved.asUint8Array ? resolved.asUint8Array() : resolved.contents;
+            if (bytes && bytes.length > 0) {
+              let decompressed = bytes;
+              if (bytes[0] === 0x78 && bytes[1] === 0x9c) {
+                decompressed = zlib.inflateSync(Buffer.from(bytes));
+              }
+              const textContent = new TextDecoder('latin1').decode(decompressed);
+              const searchStr = '(Firma Empleador)';
+              const index = textContent.indexOf(searchStr);
+              if (index !== -1) {
+                const beforeText = textContent.substring(Math.max(0, index - 500), index);
+                const tmRegex = /([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+Tm\s*$/;
+                const tdRegex = /([0-9.-]+)\s+([0-9.-]+)\s+Td\s*$/;
+                const lines = beforeText.split('\n');
+                for (let j = lines.length - 1; j >= 0; j--) {
+                  const line = lines[j].trim();
+                  const tmMatch = line.match(tmRegex);
+                  if (tmMatch) {
+                    const yVal = parseFloat(tmMatch[6]);
+                    absTextY = size.height + yVal;
+                    foundDynamicY = true;
+                    break;
+                  }
+                  const tdMatch = line.match(tdRegex);
+                  if (tdMatch) {
+                    const yVal = parseFloat(tdMatch[2]);
+                    absTextY = size.height + yVal;
+                    foundDynamicY = true;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error al detectar Y dinámica para firma:', e);
+      }
+
+      if (foundDynamicY) {
+        // La Y dinámica base de la firma original en el espacio recortado es (absTextY - cropBottom)
+        const baseDynamicY = absTextY - cropBottom;
+
+        // Ajustar coordenadas de dibujo según la Y detectada y los deltas de la configuración del usuario
+        // (por encima o debajo de los valores por defecto: 56 para texto, 65 para línea, 51 para divisor, 55 para box)
+        lineYVal = baseDynamicY + 9 + (empConfig.lineY - 65);
+        textYVal = baseDynamicY + (empConfig.textY - 56);
+        vLineYVal = baseDynamicY - 6.15 + (divConfig.y - 51);
+        vLineHeightVal = 116.3 + (divConfig.height - 116);
+        boxYVal = baseDynamicY - 1 + (boxConfig.y - 55);
+      }
+
+
+
+      // Dibujar el rectángulo (box) de la firma si está definido en la configuración
+      if (boxWidthVal > 0 && boxHeightVal > 0) {
+        destPage.drawRectangle({
+          x: x + boxXVal * scale,
+          y: y + boxYVal * scale,
+          width: boxWidthVal * scale,
+          height: boxHeightVal * scale,
+          color: rgb(1, 1, 1),        // Blanco
+        });
+      }
+
+      // 1. Dibujar la línea horizontal para la firma del empleado
+      const xStart = x + lineXVal * scale;
+      const xEnd = xStart + lineLengthVal * scale;
+      const yLine = y + lineYVal * scale;
 
       destPage.drawLine({
-        start: { x: vX, y: vYStart },
-        end: { x: vX, y: vYEnd },
+        start: { x: xStart, y: yLine },
+        end: { x: xEnd, y: yLine },
         thickness: 0.75,
         color: rgb(0, 0, 0),
       });
+
+      // 2. Escribir el texto "Firma Empleado"
+      const helveticaFont = await destDoc.embedFont(StandardFonts.Helvetica);
+      const textX = x + textXVal * scale;
+      const textY = y + textYVal * scale;
+
+      destPage.drawText(employeeText, {
+        x: textX,
+        y: textY,
+        size: fontSizeVal,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      // 3. Dibujar la línea vertical opcional
+      if (vLineHeightVal > 0) {
+        const vX = x + vLineXVal * scale;
+        const vYStart = y + vLineYVal * scale;
+        const vYEnd = vYStart + vLineHeightVal * scale;
+
+        destPage.drawLine({
+          start: { x: vX, y: vYStart },
+          end: { x: vX, y: vYEnd },
+          thickness: 0.75,
+          color: rgb(0, 0, 0),
+        });
+      }
     }
 
     return await destDoc.save();
@@ -719,6 +786,156 @@ app.post('/api/convert', authRequired, upload.single('file'), async (req, res) =
     console.error('Error durante la conversión:', error);
     res.status(500).json({ error: 'Error interno del servidor al procesar el PDF: ' + error.message });
   }
+});
+
+// Endpoint de conversión por lotes (Protegido por authRequired)
+app.post('/api/convert-batch', authRequired, async (req, res) => {
+  try {
+    const {
+      directoryPath,
+      subDirName,
+      mode,
+      splitRatio,
+      margin,
+      drawDivider,
+      cropTop,
+      cropBottom,
+      cropLeft,
+      cropRight,
+      onlyFirstPage
+    } = req.body;
+
+    if (!directoryPath) {
+      return res.status(400).json({ error: 'La ruta del directorio es requerida.' });
+    }
+
+    const resolvedPath = path.resolve(directoryPath);
+
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(400).json({ error: `El directorio especificado no existe: ${directoryPath}` });
+    }
+
+    const stat = fs.statSync(resolvedPath);
+    if (!stat.isDirectory()) {
+      return res.status(400).json({ error: 'La ruta provista no corresponde a un directorio.' });
+    }
+
+    // Crear subdirectorio de destino con timestamp
+    const baseSubDirName = subDirName ? subDirName.trim() : 'procesados';
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const nn = String(now.getMinutes()).padStart(2, '0');
+    const ss = String(now.getSeconds()).padStart(2, '0');
+    const timestamp = `${yyyy}${mm}${dd}${hh}${nn}${ss}`;
+    
+    const finalSubDirName = `${baseSubDirName}_${timestamp}`;
+    const destDirPath = path.join(resolvedPath, finalSubDirName);
+
+    if (!fs.existsSync(destDirPath)) {
+      fs.mkdirSync(destDirPath, { recursive: true });
+    }
+
+    // Leer archivos del directorio
+    const allFiles = fs.readdirSync(resolvedPath);
+    const pdfFiles = allFiles.filter(file => {
+      const filePath = path.join(resolvedPath, file);
+      try {
+        return file.toLowerCase().endsWith('.pdf') && fs.statSync(filePath).isFile();
+      } catch (e) {
+        return false;
+      }
+    });
+
+    if (pdfFiles.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No se encontraron archivos PDF para procesar.',
+        results: [],
+        processedCount: 0,
+        successCount: 0,
+        errorCount: 0,
+        outputDirectory: destDirPath
+      });
+    }
+
+    const results = [];
+    let successCount = 0;
+    let errorCount = 0;
+
+    const conversionOptions = {
+      mode: mode || 'combine',
+      splitRatio: splitRatio ? parseFloat(splitRatio) : 0.5,
+      margin: margin !== undefined ? parseFloat(margin) : 14.17,
+      drawDivider: drawDivider === 'true' || drawDivider === true,
+      cropTop: cropTop ? parseFloat(cropTop) : 0,
+      cropBottom: cropBottom ? parseFloat(cropBottom) : 0,
+      cropLeft: cropLeft ? parseFloat(cropLeft) : 0,
+      cropRight: cropRight ? parseFloat(cropRight) : 0,
+      onlyFirstPage: onlyFirstPage === 'true' || onlyFirstPage === true
+    };
+
+    let totalReceiptsCount = 0;
+
+    for (const file of pdfFiles) {
+      const srcFilePath = path.join(resolvedPath, file);
+      const destFilePath = path.join(destDirPath, file);
+
+      try {
+        const fileBuffer = fs.readFileSync(srcFilePath);
+        
+        // Cargar el PDF para contar las páginas y calcular el número de recibos
+        const srcDoc = await PDFDocument.load(fileBuffer);
+        const pageCount = srcDoc.getPageCount();
+        const fileReceipts = Math.ceil(pageCount / 2); // 2 paginas = 1 recibo
+        
+        const outputPdfBytes = await convertVerticalToHorizontal(fileBuffer, conversionOptions);
+        fs.writeFileSync(destFilePath, Buffer.from(outputPdfBytes));
+
+        results.push({ file, status: 'success', pageCount, receiptCount: fileReceipts });
+        successCount++;
+        totalReceiptsCount += fileReceipts;
+      } catch (error) {
+        console.error(`Error procesando ${file}:`, error);
+        results.push({ file, status: 'error', message: error.message });
+        errorCount++;
+      }
+    }
+
+    res.json({
+      success: true,
+      results,
+      processedCount: pdfFiles.length,
+      successCount,
+      errorCount,
+      totalReceiptsCount,
+      outputDirectory: destDirPath
+    });
+  } catch (error) {
+    console.error('Error durante la conversión por lote:', error);
+    res.status(500).json({ error: 'Error interno del servidor al procesar el lote: ' + error.message });
+  }
+});
+
+// Endpoint para abrir el diálogo nativo de selección de carpetas (Protegido por authRequired)
+app.get('/api/browse-directory', authRequired, (req, res) => {
+  // Comando PowerShell para abrir FolderBrowserDialog y devolver la ruta seleccionada
+  const psCommand = `powershell -NoProfile -STA -Command "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Seleccionar carpeta de recibos'; $f.ShowNewFolderButton = $true; if($f.ShowDialog() -eq 'OK') { Write-Output $f.SelectedPath } else { Write-Output '' }"`;
+
+  exec(psCommand, (error, stdout, stderr) => {
+    if (error) {
+      console.error('Error al abrir el selector de carpetas:', error);
+      return res.status(500).json({ error: 'No se pudo abrir el selector de carpetas: ' + error.message });
+    }
+    if (stderr && stderr.trim()) {
+      console.error('Error de stderr de PowerShell:', stderr);
+    }
+    
+    const selectedPath = stdout.trim();
+    res.json({ selectedPath: selectedPath || null });
+  });
 });
 
 // Iniciar servidor
