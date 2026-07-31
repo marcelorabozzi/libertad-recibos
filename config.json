@@ -5,22 +5,23 @@
     "employee": {
       "text": "Firma Empleador",
       "textX": 290,
-      "textY": 55,
+      "textY": 15,
       "fontSize": 7,
       "lineLength": 120,
       "lineX": 255,
-      "lineY": 65
+      "lineY": 25
     },
-    "divider": {
-      "height": 116,
-      "x": 250,
-      "y": 51
+    "employee2": {
+      "text": "Firma Empleado",
+      "textX": 490,
+      "textY": 15,
+      "fontSize": 7,
+      "lineLength": 120,
+      "lineX": 455,
+      "lineY": 25
     },
-    "box": {
-      "width": 8,
-      "height": 8,
-      "x": 483,
-      "y": 55
+    "bank": {
+      "textX": 15
     }
   }
 }

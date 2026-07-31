@@ -364,6 +364,81 @@ app.put('/api/users/me/password', authRequired, (req, res) => {
   }
 });
 
+// Función para extraer el banco de cobro de una página de origen
+function extractBankText(page, srcDoc) {
+  try {
+    const contents = page.node.Contents();
+    if (!contents) return null;
+    
+    const refs = contents.size ? Array.from({ length: contents.size() }, (_, idx) => contents.get(idx)) : [contents];
+    
+    let pageText = '';
+    for (const ref of refs) {
+      const resolved = srcDoc.context.lookup(ref);
+      if (resolved && (resolved.asUint8Array || resolved.getContentsString)) {
+        const bytes = resolved.asUint8Array ? resolved.asUint8Array() : resolved.contents;
+        if (bytes && bytes.length > 0) {
+          let decompressed = bytes;
+          if (bytes[0] === 0x78 && bytes[1] === 0x9c) {
+            try {
+              decompressed = zlib.inflateSync(Buffer.from(bytes));
+            } catch (e) {
+              // Si falla la descompresión, continuar con los bytes originales
+            }
+          }
+          const textContent = new TextDecoder('latin1').decode(decompressed);
+          pageText += textContent + '\n';
+        }
+      }
+    }
+    
+    const textMatches = [];
+    const regex = /\(([^)]+)\)\s*(Tj|TJ|'|")/g;
+    let match;
+    while ((match = regex.exec(pageText)) !== null) {
+      textMatches.push(match[1]);
+    }
+    
+    const tjRegex = /\[([^\]]+)\]\s*TJ/g;
+    while ((match = tjRegex.exec(pageText)) !== null) {
+      const inner = match[1];
+      const strRegex = /\(([^)]+)\)/g;
+      let strMatch;
+      let tjText = '';
+      while ((strMatch = strRegex.exec(inner)) !== null) {
+        tjText += strMatch[1];
+      }
+      if (tjText) textMatches.push(tjText);
+    }
+    
+    const searchTerms = ['importe acreditado en', 'acreditado en', 'acreditacion en', 'banco de cobro'];
+    for (let idx = 0; idx < textMatches.length; idx++) {
+      const t = textMatches[idx];
+      const lowerT = t.toLowerCase();
+      
+      for (const term of searchTerms) {
+        if (lowerT.includes(term)) {
+          let result = t.replace(/\\([()])/g, '$1').trim();
+          
+          const cleanLower = result.toLowerCase().replace(/[^a-z]/g, '');
+          const cleanTerm = term.replace(/[^a-z]/g, '');
+          
+          if (cleanLower === cleanTerm && idx + 1 < textMatches.length) {
+            const nextVal = textMatches[idx + 1].replace(/\\([()])/g, '$1').trim();
+            if (nextVal && nextVal.length > 1 && !nextVal.includes(':')) {
+              result += ' ' + nextVal;
+            }
+          }
+          return result;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error al extraer banco de cobro:', e);
+  }
+  return null;
+}
+
 // --- Lógica del Conversor PDF ---
 
 // Función para transformar el PDF vertical a horizontal en tamaño A4 Landscape con recortes de márgenes
@@ -379,6 +454,12 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
   const cropBottom = parseFloat(options.cropBottom) || 0;
   const cropLeft = parseFloat(options.cropLeft) || 0;
   const cropRight = parseFloat(options.cropRight) || 0;
+
+  // Obtener configuración dinámica
+  const config = getConfig();
+  const sigConfig = config.signature || {};
+  const bankConfig = sigConfig.bank || {};
+  const bankTextX = bankConfig.textX !== undefined ? parseFloat(bankConfig.textX) : 15;
 
   const srcDoc = await PDFDocument.load(pdfBuffer);
   const destDoc = await PDFDocument.create();
@@ -430,26 +511,23 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
       const config = getConfig();
       const sigConfig = config.signature || {};
       const empConfig = sigConfig.employee || {};
-
-      const divConfig = sigConfig.divider || {};
-      const boxConfig = sigConfig.box || {};
+      const empConfig2 = sigConfig.employee2 || {};
 
       let lineLengthVal = empConfig.lineLength !== undefined ? parseFloat(empConfig.lineLength) : 120;
       let lineXVal = empConfig.lineX !== undefined ? parseFloat(empConfig.lineX) : 255;
       let lineYVal = empConfig.lineY !== undefined ? parseFloat(empConfig.lineY) : 65;
-      let textXVal = empConfig.textX !== undefined ? parseFloat(empConfig.textX) : 490;
-      let textYVal = empConfig.textY !== undefined ? parseFloat(empConfig.textY) : 56;
+      let textXVal = empConfig.textX !== undefined ? parseFloat(empConfig.textX) : 290;
+      let textYVal = empConfig.textY !== undefined ? parseFloat(empConfig.textY) : 55;
       let fontSizeVal = empConfig.fontSize !== undefined ? parseFloat(empConfig.fontSize) : 7;
-      let employeeText = empConfig.text || 'Firma Empleado';
+      let employeeText = empConfig.text || 'Firma Empleador';
 
-      let vLineHeightVal = divConfig.height !== undefined ? parseFloat(divConfig.height) : 0;
-      let vLineXVal = divConfig.x !== undefined ? parseFloat(divConfig.x) : 0;
-      let vLineYVal = divConfig.y !== undefined ? parseFloat(divConfig.y) : 0;
-
-      let boxWidthVal = boxConfig.width !== undefined ? parseFloat(boxConfig.width) : 0;
-      let boxHeightVal = boxConfig.height !== undefined ? parseFloat(boxConfig.height) : 0;
-      let boxXVal = boxConfig.x !== undefined ? parseFloat(boxConfig.x) : 0;
-      let boxYVal = boxConfig.y !== undefined ? parseFloat(boxConfig.y) : 0;
+      let lineLengthVal2 = empConfig2.lineLength !== undefined ? parseFloat(empConfig2.lineLength) : 120;
+      let lineXVal2 = empConfig2.lineX !== undefined ? parseFloat(empConfig2.lineX) : 455;
+      let lineYVal2 = empConfig2.lineY !== undefined ? parseFloat(empConfig2.lineY) : 65;
+      let textXVal2 = empConfig2.textX !== undefined ? parseFloat(empConfig2.textX) : 490;
+      let textYVal2 = empConfig2.textY !== undefined ? parseFloat(empConfig2.textY) : 55;
+      let fontSizeVal2 = empConfig2.fontSize !== undefined ? parseFloat(empConfig2.fontSize) : 7;
+      let employeeText2 = empConfig2.text || 'Firma Empleado';
 
       // Intentar detectar la posición Y dinámica del cuadro de firma original de la derecha
       let foundDynamicY = false;
@@ -505,28 +583,14 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         const baseDynamicY = absTextY - cropBottom;
 
         // Ajustar coordenadas de dibujo según la Y detectada y los deltas de la configuración del usuario
-        // (por encima o debajo de los valores por defecto: 56 para texto, 65 para línea, 51 para divisor, 55 para box)
         lineYVal = baseDynamicY + 9 + (empConfig.lineY - 65);
         textYVal = baseDynamicY + (empConfig.textY - 56);
-        vLineYVal = baseDynamicY - 6.15 + (divConfig.y - 51);
-        vLineHeightVal = 116.3 + (divConfig.height - 116);
-        boxYVal = baseDynamicY - 1 + (boxConfig.y - 55);
+
+        lineYVal2 = baseDynamicY + 9 + (empConfig2.lineY - 65);
+        textYVal2 = baseDynamicY + (empConfig2.textY - 56);
       }
 
-
-
-      // Dibujar el rectángulo (box) de la firma si está definido en la configuración
-      if (boxWidthVal > 0 && boxHeightVal > 0) {
-        destPage.drawRectangle({
-          x: x + boxXVal * scale,
-          y: y + boxYVal * scale,
-          width: boxWidthVal * scale,
-          height: boxHeightVal * scale,
-          color: rgb(1, 1, 1),        // Blanco
-        });
-      }
-
-      // 1. Dibujar la línea horizontal para la firma del empleado
+      // 1. Dibujar la línea horizontal para la firma del empleado (employee 1)
       const xStart = x + lineXVal * scale;
       const xEnd = xStart + lineLengthVal * scale;
       const yLine = y + lineYVal * scale;
@@ -538,7 +602,7 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         color: rgb(0, 0, 0),
       });
 
-      // 2. Escribir el texto "Firma Empleado"
+      // 2. Escribir el texto "Firma Empleador" (employee 1)
       const helveticaFont = await destDoc.embedFont(StandardFonts.Helvetica);
       const textX = x + textXVal * scale;
       const textY = y + textYVal * scale;
@@ -551,16 +615,38 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         color: rgb(0, 0, 0),
       });
 
-      // 3. Dibujar la línea vertical opcional
-      if (vLineHeightVal > 0) {
-        const vX = x + vLineXVal * scale;
-        const vYStart = y + vLineYVal * scale;
-        const vYEnd = vYStart + vLineHeightVal * scale;
+      // 3. Dibujar la línea horizontal para la firma del empleado 2 (employee 2)
+      const xStart2 = x + lineXVal2 * scale;
+      const xEnd2 = xStart2 + lineLengthVal2 * scale;
+      const yLine2 = y + lineYVal2 * scale;
 
-        destPage.drawLine({
-          start: { x: vX, y: vYStart },
-          end: { x: vX, y: vYEnd },
-          thickness: 0.75,
+      destPage.drawLine({
+        start: { x: xStart2, y: yLine2 },
+        end: { x: xEnd2, y: yLine2 },
+        thickness: 0.75,
+        color: rgb(0, 0, 0),
+      });
+
+      // 4. Escribir el texto "Firma Empleado" (employee 2)
+      const textX2 = x + textXVal2 * scale;
+      const textY2 = y + textYVal2 * scale;
+
+      destPage.drawText(employeeText2, {
+        x: textX2,
+        y: textY2,
+        size: fontSizeVal2,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      // 5. Dibujar el texto del banco de cobro al pie del recibo
+      const bankText = extractBankText(page, srcDoc);
+      if (bankText) {
+        destPage.drawText(bankText, {
+          x: x + bankTextX * scale,
+          y: y + 12 * scale,
+          size: 8,
+          font: helveticaFont,
           color: rgb(0, 0, 0),
         });
       }
@@ -654,6 +740,31 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         });
       }
 
+      // Dibujar el texto del banco de cobro al pie de cada copia
+      const bankTextL = extractBankText(pageLeft, srcDoc);
+      const bankTextR = pageRight ? (extractBankText(pageRight, srcDoc) || bankTextL) : null;
+      if (bankTextL || bankTextR) {
+        const helveticaFont = await destDoc.embedFont(StandardFonts.Helvetica);
+        if (bankTextL) {
+          destPage.drawText(bankTextL, {
+            x: xL + bankTextX,
+            y: yL + 12,
+            size: 8,
+            font: helveticaFont,
+            color: rgb(0, 0, 0)
+          });
+        }
+        if (bankTextR) {
+          destPage.drawText(bankTextR, {
+            x: xR + bankTextX,
+            y: yR + 12,
+            size: 8,
+            font: helveticaFont,
+            color: rgb(0, 0, 0)
+          });
+        }
+      }
+
       // Dibujar línea divisoria en el centro exacto
       if (drawDivider) {
         const midX = destWidth / 2;
@@ -740,6 +851,26 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         width: drawnWidthR,
         height: drawnHeightR
       });
+
+      // Dibujar el texto del banco de cobro al pie de cada copia
+      const bankText = extractBankText(srcPage, srcDoc);
+      if (bankText) {
+        const helveticaFont = await destDoc.embedFont(StandardFonts.Helvetica);
+        destPage.drawText(bankText, {
+          x: xL + bankTextX,
+          y: yL + 12,
+          size: 8,
+          font: helveticaFont,
+          color: rgb(0, 0, 0)
+        });
+        destPage.drawText(bankText, {
+          x: xR + bankTextX,
+          y: yR + 12,
+          size: 8,
+          font: helveticaFont,
+          color: rgb(0, 0, 0)
+        });
+      }
 
       // Dibujar línea divisoria
       if (drawDivider) {
