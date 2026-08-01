@@ -114,6 +114,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (versionLabel) {
         versionLabel.textContent = `${data.version} build ${data.build}`;
       }
+      const loginVersionLabel = document.getElementById('loginVersionLabel');
+      if (loginVersionLabel) {
+        loginVersionLabel.textContent = `Versión ${data.version} build ${data.build}`;
+      }
     } catch (error) {
       console.error('[DEBUG] Error al cargar la versión:', error);
     }

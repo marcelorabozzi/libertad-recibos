@@ -599,13 +599,7 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         // La Y dinámica base de la firma original en el espacio recortado es (absTextY - cropBottom)
         const baseDynamicY = absTextY - cropBottom;
 
-        // Ajustar coordenadas de dibujo según la Y detectada y los deltas de la configuración del usuario
-        lineYVal = baseDynamicY + 9 + (empConfig.lineY - 65);
-        textYVal = baseDynamicY + (empConfig.textY - 56);
-
-        lineYVal2 = baseDynamicY + 9 + (empConfig2.lineY - 65);
-        textYVal2 = baseDynamicY + (empConfig2.textY - 56);
-
+        // Ajustar la Y del recuadro de firma según la Y detectada y la configuración
         boxYVal = baseDynamicY - 1 + (boxConfig.y - 55);
       }
 

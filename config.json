@@ -9,7 +9,7 @@
       "fontSize": 7,
       "lineLength": 120,
       "lineX": 255,
-      "lineY": 30
+      "lineY": 20
     },
     "employee2": {
       "text": "Firma Empleado",
@@ -18,7 +18,7 @@
       "fontSize": 7,
       "lineLength": 120,
       "lineX": 405,
-      "lineY": 30
+      "lineY": 20
     },
     "bank": {
       "textX": 51,
