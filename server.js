@@ -439,6 +439,140 @@ function extractBankText(page, srcDoc) {
   return null;
 }
 
+function findTextCoordinatesSequential(textContent, matchIndex) {
+  const btIndex = textContent.lastIndexOf('BT', matchIndex);
+  if (btIndex === -1) return null;
+  
+  const btBlock = textContent.substring(btIndex, matchIndex);
+  
+  let x_line = 0;
+  let y_line = 0;
+  let currentX = 0;
+  let currentY = 0;
+  let currentFontSize = 10;
+  
+  const tokens = btBlock.match(/-?[0-9.]+|[a-zA-Z*']+|\([^)]*\)|\[[^\]]*\]/g);
+  if (!tokens) return null;
+  
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === 'Tm') {
+      if (i >= 6) {
+        currentFontSize = Math.abs(parseFloat(tokens[i - 3]));
+        x_line = parseFloat(tokens[i - 2]);
+        y_line = parseFloat(tokens[i - 1]);
+        currentX = x_line;
+        currentY = y_line;
+      }
+    } else if (token === 'Td' || token === 'TD') {
+      if (i >= 2) {
+        const tx = parseFloat(tokens[i - 2]);
+        const ty = parseFloat(tokens[i - 1]);
+        x_line += tx;
+        y_line += ty;
+        currentX = x_line;
+        currentY = y_line;
+      }
+    } else if (token === 'Tf') {
+      if (i >= 1) {
+        currentFontSize = parseFloat(tokens[i - 1]);
+      }
+    }
+  }
+  
+  return {
+    fontSize: currentFontSize,
+    x: currentX,
+    y: currentY
+  };
+}
+
+async function cleanCuilOnPage(page, destPage, x, y, scale, cropLeft, cropBottom, srcDoc, destDoc, onlyTopHalf = null, splitY = 0) {
+  try {
+    const contents = page.node.Contents();
+    if (!contents) return;
+
+    const refs = contents.size ? Array.from({ length: contents.size() }, (_, idx) => contents.get(idx)) : [contents];
+    const helveticaFont = await destDoc.embedFont(StandardFonts.Helvetica);
+
+    for (const ref of refs) {
+      const resolved = srcDoc.context.lookup(ref);
+      if (!resolved || (!resolved.asUint8Array && !resolved.contents)) continue;
+
+      const bytes = resolved.asUint8Array ? resolved.asUint8Array() : resolved.contents;
+      if (!bytes || bytes.length === 0) continue;
+
+      let decompressed = bytes;
+      if (bytes[0] === 0x78 && bytes[1] === 0x9c) {
+        try {
+          decompressed = zlib.inflateSync(Buffer.from(bytes));
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      const textContent = new TextDecoder('latin1').decode(decompressed);
+
+      // Buscar cm transform para calcular coordenadas absolutas
+      let cmTx = 0;
+      let cmTy = 0;
+      const cmMatch = textContent.match(/([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+cm/);
+      if (cmMatch) {
+        cmTx = parseFloat(cmMatch[5]);
+        cmTy = parseFloat(cmMatch[6]);
+      }
+
+      const cuilRegex = /\((\d{2})\s*-\s*(\d{8})\s*-\s*(\d)\)/g;
+      let match;
+      while ((match = cuilRegex.exec(textContent)) !== null) {
+        const cleanCuil = match[1] + match[2] + match[3];
+        const matchIndex = match.index;
+
+        const coords = findTextCoordinatesSequential(textContent, matchIndex);
+        if (coords) {
+          // Coordenadas absolutas en la página de origen
+          const absX = coords.x + cmTx;
+          const absY = coords.y + cmTy;
+
+          // Si estamos en modo split, verificar si pertenece a la mitad correspondiente
+          if (onlyTopHalf !== null) {
+            if (onlyTopHalf && absY < splitY) continue;
+            if (!onlyTopHalf && absY >= splitY) continue;
+          }
+
+          // Mapear coordenadas a la página de destino
+          const destX = x + (absX - cropLeft) * scale;
+          const destY = y + (absY - cropBottom) * scale;
+          const scaledFontSize = coords.fontSize * scale;
+
+          // Dibujar rectángulo blanco para tapar el CUIL anterior
+          const coverWidth = coords.fontSize * 7.5; 
+          const coverHeight = coords.fontSize * 1.2;
+
+          destPage.drawRectangle({
+            x: destX - 1 * scale,
+            y: destY - 1 * scale,
+            width: coverWidth * scale,
+            height: coverHeight * scale,
+            color: rgb(1, 1, 1), // Blanco
+          });
+
+          // Dibujar el CUIL limpio
+          destPage.drawText(cleanCuil, {
+            x: destX,
+            y: destY,
+            size: scaledFontSize,
+            font: helveticaFont,
+            color: rgb(0, 0, 0),
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error al limpiar CUIL de la página:', e);
+  }
+}
+
 // --- Lógica del Conversor PDF ---
 
 // Función para transformar el PDF vertical a horizontal en tamaño A4 Landscape con recortes de márgenes
@@ -507,6 +641,9 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         width: drawnWidth,
         height: drawnHeight
       });
+
+      // Limpiar los guiones del CUIL en el recibo generado
+      await cleanCuilOnPage(page, destPage, x, y, scale, cropLeft, cropBottom, srcDoc, destDoc);
 
       // Tapar el cuadro de firma original con un rectángulo blanco
       destPage.drawRectangle({
@@ -739,6 +876,9 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         height: drawnHeightL
       });
 
+      // Limpiar los guiones del CUIL en el recibo (mitad izquierda / original)
+      await cleanCuilOnPage(pageLeft, destPage, xL, yL, scaleL, cropLeft, cropBottom, srcDoc, destDoc);
+
       // Calcular y dibujar página derecha (Copia)
       if (pageRight) {
         const effectiveWidthR = sizeRight.width - cropLeft - cropRight;
@@ -767,6 +907,9 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
           width: drawnWidthR,
           height: drawnHeightR
         });
+
+        // Limpiar los guiones del CUIL en el recibo (mitad derecha / copia)
+        await cleanCuilOnPage(pageRight, destPage, xR, yR, scaleR, cropLeft, cropBottom, srcDoc, destDoc);
       }
 
       // Dibujar el texto del banco de cobro al pie de cada copia
@@ -852,6 +995,9 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         height: drawnHeightL
       });
 
+      // Limpiar los guiones del CUIL en el recibo (mitad izquierda / original)
+      await cleanCuilOnPage(srcPage, destPage, xL, yL, scaleL, cropLeft, (height * splitRatio) + (cropBottom * 0.5), srcDoc, destDoc, true, height * splitRatio);
+
       // Calcular efectivo mitad derecha
       const effectiveWidthR = width - cropLeft - cropRight;
       const effectiveHeightR = bottomHeight - (cropTop * 0.5) - cropBottom;
@@ -880,6 +1026,9 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         width: drawnWidthR,
         height: drawnHeightR
       });
+
+      // Limpiar los guiones del CUIL en el recibo (mitad derecha / copia)
+      await cleanCuilOnPage(srcPage, destPage, xR, yR, scaleR, cropLeft, cropBottom, srcDoc, destDoc, false, height * splitRatio);
 
       // Dibujar el texto del banco de cobro al pie de cada copia
       const bankText = extractBankText(srcPage, srcDoc);
