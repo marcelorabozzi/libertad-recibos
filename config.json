@@ -9,19 +9,20 @@
       "fontSize": 7,
       "lineLength": 120,
       "lineX": 255,
-      "lineY": 25
+      "lineY": 30
     },
     "employee2": {
       "text": "Firma Empleado",
-      "textX": 490,
+      "textX": 445,
       "textY": 15,
       "fontSize": 7,
       "lineLength": 120,
-      "lineX": 455,
-      "lineY": 25
+      "lineX": 405,
+      "lineY": 30
     },
     "bank": {
-      "textX": 15
+      "textX": 51,
+      "textY": 12
     },
     "box": {
       "width": 490,

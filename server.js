@@ -460,6 +460,7 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
   const sigConfig = config.signature || {};
   const bankConfig = sigConfig.bank || {};
   const bankTextX = bankConfig.textX !== undefined ? parseFloat(bankConfig.textX) : 15;
+  const bankTextY = bankConfig.textY !== undefined ? parseFloat(bankConfig.textY) : 12;
 
   const srcDoc = await PDFDocument.load(pdfBuffer);
   const destDoc = await PDFDocument.create();
@@ -639,7 +640,7 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
       // 2. Escribir el texto "Firma Empleador" (employee 1)
       const helveticaFont = await destDoc.embedFont(StandardFonts.Helvetica);
       const textX = x + textXVal * scale;
-      const textY = y + textYVal * scale;
+      const textY = y + bankTextY * scale;
 
       destPage.drawText(employeeText, {
         x: textX,
@@ -663,7 +664,7 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
 
       // 4. Escribir el texto "Firma Empleado" (employee 2)
       const textX2 = x + textXVal2 * scale;
-      const textY2 = y + textYVal2 * scale;
+      const textY2 = y + bankTextY * scale;
 
       destPage.drawText(employeeText2, {
         x: textX2,
@@ -678,7 +679,7 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
       if (bankText) {
         destPage.drawText(bankText, {
           x: x + bankTextX * scale,
-          y: y + 12 * scale,
+          y: y + bankTextY * scale,
           size: 8,
           font: helveticaFont,
           color: rgb(0, 0, 0),
@@ -782,7 +783,7 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         if (bankTextL) {
           destPage.drawText(bankTextL, {
             x: xL + bankTextX,
-            y: yL + 12,
+            y: yL + bankTextY,
             size: 8,
             font: helveticaFont,
             color: rgb(0, 0, 0)
@@ -791,7 +792,7 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         if (bankTextR) {
           destPage.drawText(bankTextR, {
             x: xR + bankTextX,
-            y: yR + 12,
+            y: yR + bankTextY,
             size: 8,
             font: helveticaFont,
             color: rgb(0, 0, 0)
@@ -892,14 +893,14 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         const helveticaFont = await destDoc.embedFont(StandardFonts.Helvetica);
         destPage.drawText(bankText, {
           x: xL + bankTextX,
-          y: yL + 12,
+          y: yL + bankTextY,
           size: 8,
           font: helveticaFont,
           color: rgb(0, 0, 0)
         });
         destPage.drawText(bankText, {
           x: xR + bankTextX,
-          y: yR + 12,
+          y: yR + bankTextY,
           size: 8,
           font: helveticaFont,
           color: rgb(0, 0, 0)
