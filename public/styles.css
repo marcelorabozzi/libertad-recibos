@@ -1242,3 +1242,31 @@ iframe {
 .input-with-button button {
   flex-shrink: 0;
 }
+
+/* Botón para ver PDF procesado en lote */
+.btn-view-pdf {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-decoration: none;
+  transition: var(--transition);
+  margin-left: 0.5rem;
+}
+
+.btn-view-pdf:hover {
+  background: var(--bg-secondary);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: var(--shadow-sm);
+}
+

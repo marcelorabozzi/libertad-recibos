@@ -507,11 +507,21 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
         height: drawnHeight
       });
 
+      // Tapar el cuadro de firma original con un rectángulo blanco
+      destPage.drawRectangle({
+        x,
+        y,
+        width: drawnWidth,
+        height: 35 * scale,
+        color: rgb(1, 1, 1),
+      });
+
       // Obtener configuración dinámica
       const config = getConfig();
       const sigConfig = config.signature || {};
       const empConfig = sigConfig.employee || {};
       const empConfig2 = sigConfig.employee2 || {};
+      const boxConfig = sigConfig.box || {};
 
       let lineLengthVal = empConfig.lineLength !== undefined ? parseFloat(empConfig.lineLength) : 120;
       let lineXVal = empConfig.lineX !== undefined ? parseFloat(empConfig.lineX) : 255;
@@ -528,6 +538,12 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
       let textYVal2 = empConfig2.textY !== undefined ? parseFloat(empConfig2.textY) : 55;
       let fontSizeVal2 = empConfig2.fontSize !== undefined ? parseFloat(empConfig2.fontSize) : 7;
       let employeeText2 = empConfig2.text || 'Firma Empleado';
+
+      let boxWidthVal = boxConfig.width !== undefined ? parseFloat(boxConfig.width) : 0;
+      let boxHeightVal = boxConfig.height !== undefined ? parseFloat(boxConfig.height) : 0;
+      let boxXVal = boxConfig.x !== undefined ? parseFloat(boxConfig.x) : 0;
+      let boxYVal = boxConfig.y !== undefined ? parseFloat(boxConfig.y) : 0;
+      let boxShowBorder = boxConfig.showBorder === true || boxConfig.showBorder === 'true';
 
       // Intentar detectar la posición Y dinámica del cuadro de firma original de la derecha
       let foundDynamicY = false;
@@ -588,6 +604,24 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
 
         lineYVal2 = baseDynamicY + 9 + (empConfig2.lineY - 65);
         textYVal2 = baseDynamicY + (empConfig2.textY - 56);
+
+        boxYVal = baseDynamicY - 1 + (boxConfig.y - 55);
+      }
+
+      // Dibujar el recuadro blanco configurable si está definido en la configuración
+      if (boxWidthVal > 0 && boxHeightVal > 0) {
+        const drawOptions = {
+          x: x + boxXVal * scale,
+          y: y + boxYVal * scale,
+          width: boxWidthVal * scale,
+          height: boxHeightVal * scale,
+          color: rgb(1, 1, 1),        // Blanco
+        };
+        if (boxShowBorder) {
+          drawOptions.borderColor = rgb(0, 0, 0); // Negro
+          drawOptions.borderWidth = 0.75;          // Ancho de borde estándar para firmas
+        }
+        destPage.drawRectangle(drawOptions);
       }
 
       // 1. Dibujar la línea horizontal para la firma del empleado (employee 1)
@@ -1048,6 +1082,29 @@ app.post('/api/convert-batch', authRequired, async (req, res) => {
     console.error('Error durante la conversión por lote:', error);
     res.status(500).json({ error: 'Error interno del servidor al procesar el lote: ' + error.message });
   }
+});
+
+// Endpoint para visualizar un PDF procesado de un lote (Protegido por authRequired)
+app.get('/api/view-pdf', authRequired, (req, res) => {
+  const { dir, file } = req.query;
+
+  if (!dir || !file) {
+    return res.status(400).json({ error: 'La ruta del directorio (dir) y el archivo (file) son requeridos.' });
+  }
+
+  if (!file.toLowerCase().endsWith('.pdf')) {
+    return res.status(400).json({ error: 'Solo se permite visualizar archivos PDF.' });
+  }
+
+  const absolutePath = path.resolve(dir, file);
+
+  if (!fs.existsSync(absolutePath)) {
+    return res.status(404).json({ error: 'El archivo PDF solicitado no existe.' });
+  }
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file)}"`);
+  res.sendFile(absolutePath);
 });
 
 // Endpoint para abrir el diálogo nativo de selección de carpetas (Protegido por authRequired)

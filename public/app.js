@@ -1072,6 +1072,15 @@ document.addEventListener('DOMContentLoaded', () => {
         badge.textContent = res.status === 'success' ? 'Éxito' : 'Error';
         statusDiv.appendChild(badge);
 
+        if (res.status === 'success') {
+          const viewBtn = document.createElement('a');
+          viewBtn.className = 'btn-view-pdf';
+          viewBtn.href = `/api/view-pdf?dir=${encodeURIComponent(data.outputDirectory)}&file=${encodeURIComponent(res.file)}`;
+          viewBtn.target = '_blank';
+          viewBtn.textContent = 'VER PDF';
+          statusDiv.appendChild(viewBtn);
+        }
+
         if (res.status !== 'success' && res.message) {
           const errMsg = document.createElement('span');
           errMsg.style.fontSize = '0.7rem';
