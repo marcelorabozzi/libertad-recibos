@@ -119,7 +119,7 @@ function getConfig() {
   } catch (error) {
     console.error('Error al leer config.json:', error);
   }
-  return { showConvertButton: true, showSignatureButton: true };
+  return { showConvertButton: true, showSignatureButton: true, excludeCuit: [] };
 }
 
 // Endpoint para obtener la configuración general
@@ -396,7 +396,7 @@ function extractBankText(page, srcDoc) {
     const regex = /\(([^)]+)\)\s*(Tj|TJ|'|")/g;
     let match;
     while ((match = regex.exec(pageText)) !== null) {
-      textMatches.push(match[1]);
+      textMatches.push({ text: match[1], index: match.index });
     }
     
     const tjRegex = /\[([^\]]+)\]\s*TJ/g;
@@ -408,27 +408,50 @@ function extractBankText(page, srcDoc) {
       while ((strMatch = strRegex.exec(inner)) !== null) {
         tjText += strMatch[1];
       }
-      if (tjText) textMatches.push(tjText);
+      if (tjText) textMatches.push({ text: tjText, index: match.index });
     }
+    
+    // Ordenar los fragmentos por su índice de aparición en el flujo del PDF
+    textMatches.sort((a, b) => a.index - b.index);
     
     const searchTerms = ['importe acreditado en', 'acreditado en', 'acreditacion en', 'banco de cobro'];
     for (let idx = 0; idx < textMatches.length; idx++) {
-      const t = textMatches[idx];
+      const t = textMatches[idx].text;
       const lowerT = t.toLowerCase();
       
       for (const term of searchTerms) {
         if (lowerT.includes(term)) {
           let result = t.replace(/\\([()])/g, '$1').trim();
           
-          const cleanLower = result.toLowerCase().replace(/[^a-z]/g, '');
-          const cleanTerm = term.replace(/[^a-z]/g, '');
-          
-          if (cleanLower === cleanTerm && idx + 1 < textMatches.length) {
-            const nextVal = textMatches[idx + 1].replace(/\\([()])/g, '$1').trim();
-            if (nextVal && nextVal.length > 1 && !nextVal.includes(':')) {
+          // Continuar agregando fragmentos siguientes que puedan ser parte del nombre del banco
+          let nextIdx = idx + 1;
+          while (nextIdx < textMatches.length) {
+            const nextVal = textMatches[nextIdx].text.replace(/\\([()])/g, '$1').trim();
+            
+            // Si el siguiente fragmento es vacío, tiene dos puntos (indica otra etiqueta),
+            // o contiene palabras clave de otras áreas del recibo, paramos de concatenar.
+            if (!nextVal || nextVal.includes(':')) {
+              break;
+            }
+            
+            const lowerNext = nextVal.toLowerCase();
+            const stopKeywords = ['firma', 'empleador', 'empleado', 'fecha', 'sueldo', 'neto', 'total', 'original', 'copia', 'recibo', 'cuil', 'cuit', 'documento'];
+            if (stopKeywords.some(kw => lowerNext.includes(kw))) {
+              break;
+            }
+            
+            // Si el resultado no termina en espacio/guion y el valor no empieza con espacio/guion,
+            // agregamos un espacio intermedio.
+            if (result.endsWith(' ') || nextVal.startsWith(' ') || result.endsWith('-') || nextVal.startsWith('-')) {
+              result += nextVal;
+            } else {
               result += ' ' + nextVal;
             }
+            nextIdx++;
           }
+          
+          // Limpiar espacios dobles o múltiples
+          result = result.replace(/\s+/g, ' ').trim();
           return result;
         }
       }
@@ -485,6 +508,45 @@ function findTextCoordinatesSequential(textContent, matchIndex) {
     x: currentX,
     y: currentY
   };
+}
+
+function getCuilsFromPage(page, srcDoc) {
+  const cuils = [];
+  try {
+    const contents = page.node.Contents();
+    if (!contents) return cuils;
+
+    const refs = contents.size ? Array.from({ length: contents.size() }, (_, idx) => contents.get(idx)) : [contents];
+    for (const ref of refs) {
+      const resolved = srcDoc.context.lookup(ref);
+      if (!resolved || (!resolved.asUint8Array && !resolved.contents)) continue;
+
+      const bytes = resolved.asUint8Array ? resolved.asUint8Array() : resolved.contents;
+      if (!bytes || bytes.length === 0) continue;
+
+      let decompressed = bytes;
+      if (bytes[0] === 0x78 && bytes[1] === 0x9c) {
+        try {
+          decompressed = zlib.inflateSync(Buffer.from(bytes));
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      const textContent = new TextDecoder('latin1').decode(decompressed);
+      const cuilRegex = /\((\d{2})\s*-\s*(\d{8})\s*-\s*(\d)\)/g;
+      let match;
+      while ((match = cuilRegex.exec(textContent)) !== null) {
+        const cleanCuil = match[1] + match[2] + match[3];
+        if (!cuils.includes(cleanCuil)) {
+          cuils.push(cleanCuil);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error al extraer CUILs de la página:', e);
+  }
+  return cuils;
 }
 
 async function cleanCuilOnPage(page, destPage, x, y, scale, cropLeft, cropBottom, srcDoc, destDoc, onlyTopHalf = null, splitY = 0) {
@@ -600,10 +662,22 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
   const destDoc = await PDFDocument.create();
   const pages = srcDoc.getPages();
 
+  const excludeCuit = Array.isArray(config.excludeCuit)
+    ? config.excludeCuit.map(c => String(c).replace(/[^0-9]/g, ''))
+    : [];
+
   // Caso especial: Una sola página en disposición vertical (para Firma)
   if (onlyFirstPage) {
     for (let i = 0; i < pages.length; i += 2) {
       const page = pages[i];
+      if (excludeCuit.length > 0) {
+        const cuils = getCuilsFromPage(page, srcDoc);
+        const shouldExclude = cuils.some(cuil => excludeCuit.includes(cuil));
+        if (shouldExclude) {
+          console.log(`[INFO] Omitiendo recibo para CUIL/CUIT de: [${cuils.join(', ')}] (onlyFirstPage)`);
+          continue;
+        }
+      }
       const size = page.getSize();
 
       // Dimensiones fijas de A4 Portrait (vertical)
@@ -834,6 +908,15 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
       const pageLeft = pages[i];
       const pageRight = (i + 1 < pages.length) ? pages[i + 1] : null;
 
+      if (excludeCuit.length > 0) {
+        const cuils = getCuilsFromPage(pageLeft, srcDoc);
+        const shouldExclude = cuils.some(cuil => excludeCuit.includes(cuil));
+        if (shouldExclude) {
+          console.log(`[INFO] Omitiendo recibo para CUIL/CUIT de: [${cuils.join(', ')}] (combine)`);
+          continue;
+        }
+      }
+
       const sizeLeft = pageLeft.getSize();
       const sizeRight = pageRight ? pageRight.getSize() : sizeLeft;
 
@@ -953,6 +1036,16 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
     // MODO DIVIDIR: Corta una página al medio verticalmente y pone las mitades lado a lado
     for (let i = 0; i < pages.length; i++) {
       const srcPage = pages[i];
+
+      if (excludeCuit.length > 0) {
+        const cuils = getCuilsFromPage(srcPage, srcDoc);
+        const shouldExclude = cuils.some(cuil => excludeCuit.includes(cuil));
+        if (shouldExclude) {
+          console.log(`[INFO] Omitiendo recibo para CUIL/CUIT de: [${cuils.join(', ')}] (split)`);
+          continue;
+        }
+      }
+
       const { width, height } = srcPage.getSize();
 
       // Alturas originales de división
@@ -1064,6 +1157,10 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
     }
   }
 
+  if (destDoc.getPages().length === 0) {
+    return null;
+  }
+
   return await destDoc.save();
 }
 
@@ -1087,6 +1184,10 @@ app.post('/api/convert', authRequired, upload.single('file'), async (req, res) =
       cropRight: cropRight ? parseFloat(cropRight) : 0,
       onlyFirstPage: onlyFirstPage
     });
+
+    if (!outputPdfBytes) {
+      return res.status(400).send('El recibo no fue generado porque todos los CUITs en el archivo están excluidos en la configuración.');
+    }
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="recibo_horizontal.pdf"');
@@ -1201,11 +1302,17 @@ app.post('/api/convert-batch', authRequired, async (req, res) => {
         const fileReceipts = Math.ceil(pageCount / 2); // 2 paginas = 1 recibo
         
         const outputPdfBytes = await convertVerticalToHorizontal(fileBuffer, conversionOptions);
-        fs.writeFileSync(destFilePath, Buffer.from(outputPdfBytes));
-
-        results.push({ file, status: 'success', pageCount, receiptCount: fileReceipts });
-        successCount++;
-        totalReceiptsCount += fileReceipts;
+        if (outputPdfBytes) {
+          fs.writeFileSync(destFilePath, Buffer.from(outputPdfBytes));
+          const outDoc = await PDFDocument.load(outputPdfBytes);
+          const outReceipts = outDoc.getPageCount();
+          results.push({ file, status: 'success', pageCount, receiptCount: outReceipts });
+          successCount++;
+          totalReceiptsCount += outReceipts;
+        } else {
+          results.push({ file, status: 'skipped', pageCount, receiptCount: 0, message: 'Todos los CUITs del archivo están en la lista de exclusión.' });
+          successCount++;
+        }
       } catch (error) {
         console.error(`Error procesando ${file}:`, error);
         results.push({ file, status: 'error', message: error.message });

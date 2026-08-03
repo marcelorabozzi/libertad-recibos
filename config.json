@@ -1,6 +1,10 @@
 {
   "showConvertButton": false,
   "showSignatureButton": true,
+  "excludeCuit": [
+    20269847434,
+    27284010707
+  ],
   "signature": {
     "employee": {
       "text": "Firma Empleador",

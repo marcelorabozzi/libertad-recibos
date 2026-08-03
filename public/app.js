@@ -186,6 +186,28 @@ document.addEventListener('DOMContentLoaded', () => {
         btnBatchFirma.classList.remove('hidden');
       }
     }
+
+    // Renderizar lista de CUITs excluidos
+    const excludedCuitsList = document.getElementById('excludedCuitsList');
+    const excludedCuitsCount = document.getElementById('excludedCuitsCount');
+    if (excludedCuitsList && excludedCuitsCount) {
+      excludedCuitsList.innerHTML = '';
+      const list = appConfig.excludeCuit || [];
+      excludedCuitsCount.textContent = list.length;
+      if (list.length === 0) {
+        const li = document.createElement('li');
+        li.textContent = 'Ninguno (todos se procesan)';
+        li.style.listStyleType = 'none';
+        li.style.marginLeft = '-1rem';
+        excludedCuitsList.appendChild(li);
+      } else {
+        list.forEach(cuit => {
+          const li = document.createElement('li');
+          li.textContent = cuit;
+          excludedCuitsList.appendChild(li);
+        });
+      }
+    }
   }
 
   async function checkSession() {
@@ -1072,8 +1094,17 @@ document.addEventListener('DOMContentLoaded', () => {
         statusDiv.className = 'batch-file-status';
 
         const badge = document.createElement('span');
-        badge.className = `status-badge ${res.status === 'success' ? 'status-success' : 'status-error'}`;
-        badge.textContent = res.status === 'success' ? 'Éxito' : 'Error';
+        let badgeClass = 'status-error';
+        let badgeText = 'Error';
+        if (res.status === 'success') {
+          badgeClass = 'status-success';
+          badgeText = 'Éxito';
+        } else if (res.status === 'skipped') {
+          badgeClass = 'status-pending';
+          badgeText = 'Omitido';
+        }
+        badge.className = `status-badge ${badgeClass}`;
+        badge.textContent = badgeText;
         statusDiv.appendChild(badge);
 
         if (res.status === 'success') {
