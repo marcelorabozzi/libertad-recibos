@@ -1,6 +1,7 @@
 {
   "showConvertButton": false,
   "showSignatureButton": true,
+  "logReceiptDetails": false,
   "excludeCuit": [
     20269847434,
     27284010707

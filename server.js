@@ -119,7 +119,7 @@ function getConfig() {
   } catch (error) {
     console.error('Error al leer config.json:', error);
   }
-  return { showConvertButton: true, showSignatureButton: true, excludeCuit: [] };
+  return { showConvertButton: true, showSignatureButton: true, logReceiptDetails: false, excludeCuit: [] };
 }
 
 // Endpoint para obtener la configuración general
@@ -393,7 +393,7 @@ function extractBankText(page, srcDoc) {
     }
     
     const textMatches = [];
-    const regex = /\(([^)]+)\)\s*(Tj|TJ|'|")/g;
+    const regex = /\(((?:[^\(\)\\]|\\.)*)\)\s*(Tj|TJ|'|")/g;
     let match;
     while ((match = regex.exec(pageText)) !== null) {
       textMatches.push({ text: match[1], index: match.index });
@@ -402,7 +402,7 @@ function extractBankText(page, srcDoc) {
     const tjRegex = /\[([^\]]+)\]\s*TJ/g;
     while ((match = tjRegex.exec(pageText)) !== null) {
       const inner = match[1];
-      const strRegex = /\(([^)]+)\)/g;
+      const strRegex = /\(((?:[^\(\)\\]|\\.)*)\)/g;
       let strMatch;
       let tjText = '';
       while ((strMatch = strRegex.exec(inner)) !== null) {
@@ -428,10 +428,18 @@ function extractBankText(page, srcDoc) {
           while (nextIdx < textMatches.length) {
             const nextVal = textMatches[nextIdx].text.replace(/\\([()])/g, '$1').trim();
             
-            // Si el siguiente fragmento es vacío, tiene dos puntos (indica otra etiqueta),
-            // o contiene palabras clave de otras áreas del recibo, paramos de concatenar.
-            if (!nextVal || nextVal.includes(':')) {
+            if (!nextVal) {
               break;
+            }
+            
+            // Si el siguiente fragmento contiene dos puntos, verificamos si es una etiqueta de otra sección.
+            if (nextVal.includes(':')) {
+              const colonIdx = nextVal.indexOf(':');
+              const prefix = nextVal.substring(0, colonIdx).toLowerCase().trim();
+              const labelBreakWords = ['lugar', 'fecha', 'firma', 'periodo', 'legajo', 'seccion', 'sección', 'ingreso', 'categoría', 'categoria', 'cuit', 'cuil', 'documento', 'domicilio', 'social', 'neto', 'total', 'recibo', 'original', 'copia', 'empleado', 'empleador'];
+              if (labelBreakWords.some(kw => prefix.includes(kw))) {
+                break;
+              }
             }
             
             const lowerNext = nextVal.toLowerCase();
@@ -450,8 +458,9 @@ function extractBankText(page, srcDoc) {
             nextIdx++;
           }
           
-          // Limpiar espacios dobles o múltiples
-          result = result.replace(/\s+/g, ' ').trim();
+          // Limpiar paréntesis y espacios dobles o múltiples
+          result = result.replace(/[()]/g, '').replace(/\s+/g, ' ').trim();
+          console.log(`[DEBUG] extractBankText encontró coincidencia: "${result}"`);
           return result;
         }
       }
@@ -547,6 +556,91 @@ function getCuilsFromPage(page, srcDoc) {
     console.error('Error al extraer CUILs de la página:', e);
   }
   return cuils;
+}
+
+function getEmployeeNameFromPage(page, srcDoc) {
+  try {
+    const contents = page.node.Contents();
+    if (!contents) return 'No Encontrado';
+    
+    const refs = contents.size ? Array.from({ length: contents.size() }, (_, idx) => contents.get(idx)) : [contents];
+    
+    let pageText = '';
+    for (const ref of refs) {
+      const resolved = srcDoc.context.lookup(ref);
+      if (resolved && (resolved.asUint8Array || resolved.getContentsString)) {
+        const bytes = resolved.asUint8Array ? resolved.asUint8Array() : resolved.contents;
+        if (bytes && bytes.length > 0) {
+          let decompressed = bytes;
+          if (bytes[0] === 0x78 && bytes[1] === 0x9c) {
+            try {
+              decompressed = zlib.inflateSync(Buffer.from(bytes));
+            } catch (e) {}
+          }
+          const textContent = new TextDecoder('latin1').decode(decompressed);
+          pageText += textContent + '\n';
+        }
+      }
+    }
+    
+    const textMatches = [];
+    const regex = /\(((?:[^\(\)\\]|\\.)*)\)\s*(Tj|TJ|'|")/g;
+    let match;
+    while ((match = regex.exec(pageText)) !== null) {
+      textMatches.push({ text: match[1], index: match.index });
+    }
+    
+    const tjRegex = /\[([^\]]+)\]\s*TJ/g;
+    while ((match = tjRegex.exec(pageText)) !== null) {
+      const inner = match[1];
+      const strRegex = /\(((?:[^\(\)\\]|\\.)*)\)/g;
+      let strMatch;
+      let tjText = '';
+      while ((strMatch = strRegex.exec(inner)) !== null) {
+        tjText += strMatch[1];
+      }
+      if (tjText) textMatches.push({ text: tjText, index: match.index });
+    }
+    
+    textMatches.sort((a, b) => a.index - b.index);
+    
+    for (let i = 0; i < textMatches.length; i++) {
+      const t = textMatches[i].text;
+      const commaMatch = t.match(/, ?[A-ZÁÉÍÓÚÑ]/);
+      if (commaMatch) {
+        let name = t;
+        let j = i - 1;
+        while (j >= 0) {
+          const prev = textMatches[j].text.trim();
+          if (!prev || prev.length > 25 || /[\d:$_\/-]/.test(prev)) {
+            break;
+          }
+          const lowerPrev = prev.toLowerCase();
+          const labelKeywords = ['apellido', 'nombre', 'legajo', 'cuil', 'cuit', 'hoja', 'empresa', 'mes', 'año', 'fecha'];
+          if (labelKeywords.some(kw => lowerPrev.includes(kw))) {
+            break;
+          }
+          name = prev + name;
+          j--;
+        }
+        return name.trim();
+      }
+    }
+  } catch (e) {
+    console.error('Error en getEmployeeNameFromPage:', e);
+  }
+  return 'No Encontrado';
+}
+
+function logReceipt(message) {
+  console.log(message);
+  try {
+    const logFilePath = path.join(__dirname, 'texto.log');
+    const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    fs.appendFileSync(logFilePath, `[${timestamp}] ${message}\n`, 'utf8');
+  } catch (err) {
+    console.error('Error al escribir en texto.log:', err);
+  }
 }
 
 async function cleanCuilOnPage(page, destPage, x, y, scale, cropLeft, cropBottom, srcDoc, destDoc, onlyTopHalf = null, splitY = 0) {
@@ -653,6 +747,7 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
 
   // Obtener configuración dinámica
   const config = getConfig();
+  const logDetails = config.logReceiptDetails === true || String(config.logReceiptDetails) === 'true';
   const sigConfig = config.signature || {};
   const bankConfig = sigConfig.bank || {};
   const bankTextX = bankConfig.textX !== undefined ? parseFloat(bankConfig.textX) : 15;
@@ -881,6 +976,11 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
 
       // 5. Dibujar el texto del banco de cobro al pie del recibo
       const bankText = extractBankText(page, srcDoc);
+      if (logDetails) {
+        const cuils = getCuilsFromPage(page, srcDoc);
+        const name = getEmployeeNameFromPage(page, srcDoc);
+        logReceipt(`[RECIBO] CUIL/CUIT: ${cuils.join(', ')} | Titular: ${name} | BANK: ${bankText || 'No detectado'}`);
+      }
       if (bankText) {
         destPage.drawText(bankText, {
           x: x + bankTextX * scale,
@@ -998,6 +1098,11 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
       // Dibujar el texto del banco de cobro al pie de cada copia
       const bankTextL = extractBankText(pageLeft, srcDoc);
       const bankTextR = pageRight ? (extractBankText(pageRight, srcDoc) || bankTextL) : null;
+      if (logDetails) {
+        const cuils = getCuilsFromPage(pageLeft, srcDoc);
+        const name = getEmployeeNameFromPage(pageLeft, srcDoc);
+        logReceipt(`[RECIBO] CUIL/CUIT: ${cuils.join(', ')} | Titular: ${name} | BANK: ${bankTextL || 'No detectado'}`);
+      }
       if (bankTextL || bankTextR) {
         const helveticaFont = await destDoc.embedFont(StandardFonts.Helvetica);
         if (bankTextL) {
@@ -1125,6 +1230,11 @@ async function convertVerticalToHorizontal(pdfBuffer, options = {}) {
 
       // Dibujar el texto del banco de cobro al pie de cada copia
       const bankText = extractBankText(srcPage, srcDoc);
+      if (logDetails) {
+        const cuils = getCuilsFromPage(srcPage, srcDoc);
+        const name = getEmployeeNameFromPage(srcPage, srcDoc);
+        logReceipt(`[RECIBO] CUIL/CUIT: ${cuils.join(', ')} | Titular: ${name} | BANK: ${bankText || 'No detectado'}`);
+      }
       if (bankText) {
         const helveticaFont = await destDoc.embedFont(StandardFonts.Helvetica);
         destPage.drawText(bankText, {
