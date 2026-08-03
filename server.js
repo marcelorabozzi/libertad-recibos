@@ -458,8 +458,20 @@ function extractBankText(page, srcDoc) {
             nextIdx++;
           }
           
-          // Limpiar paréntesis y espacios dobles o múltiples
-          result = result.replace(/[()]/g, '').replace(/\s+/g, ' ').trim();
+          // Limpiar paréntesis, espacios dobles o múltiples y normalizar nombres de bancos separados por espaciados (kerning)
+          result = result
+            .replace(/[()]/g, '')
+            .replace(/\bBB\s*VA\b/gi, 'BBVA')
+            .replace(/\bSANTAN\s*DER\b/gi, 'SANTANDER')
+            .replace(/\bGALIC\s*IA\b/gi, 'GALICIA')
+            .replace(/\bHIPOTE\s*CARIO\b/gi, 'HIPOTECARIO')
+            .replace(/\bCREDI\s*COOP\b/gi, 'CREDICOOP')
+            .replace(/\bSUPER\s*VIELLE\b/gi, 'SUPERVIELLE')
+            .replace(/\bPATA\s*GONIA\b/gi, 'PATAGONIA')
+            .replace(/\bCOLUM\s*BIA\b/gi, 'COLUMBIA')
+            .replace(/\bSA\s*LTA\b/gi, 'SALTA')
+            .replace(/\s+/g, ' ')
+            .trim();
           console.log(`[DEBUG] extractBankText encontró coincidencia: "${result}"`);
           return result;
         }
@@ -604,6 +616,51 @@ function getEmployeeNameFromPage(page, srcDoc) {
     
     textMatches.sort((a, b) => a.index - b.index);
     
+    // Método 1: Búsqueda Espacial por la etiqueta de la cabecera "APELLIDO Y NOMBRE"
+    let labelMatch = null;
+    for (let i = 0; i < textMatches.length; i++) {
+      const t = textMatches[i].text.toLowerCase();
+      if (t.includes('apellido') && (t.includes('nombre') || t.includes('y'))) {
+        labelMatch = textMatches[i];
+        break;
+      }
+    }
+    if (!labelMatch) {
+      for (let i = 0; i < textMatches.length; i++) {
+        const t = textMatches[i].text.toLowerCase();
+        if (t.includes('apellido')) {
+          labelMatch = textMatches[i];
+          break;
+        }
+      }
+    }
+
+    if (labelMatch) {
+      const coords = findTextCoordinatesSequential(pageText, labelMatch.index);
+      if (coords) {
+        const labelX = coords.x;
+        const labelY = coords.y;
+        
+        // Filtrar y agrupar elementos que estén físicamente debajo de la etiqueta (un poco más abajo y alineados en X)
+        const candidateFragments = [];
+        for (let i = 0; i < textMatches.length; i++) {
+          const m = textMatches[i];
+          const mCoords = findTextCoordinatesSequential(pageText, m.index);
+          if (mCoords) {
+            const yDist = labelY - mCoords.y;
+            if (yDist >= 5 && yDist <= 18 && mCoords.x >= labelX - 80 && mCoords.x <= labelX + 80) {
+              candidateFragments.push(m.text);
+            }
+          }
+        }
+        
+        if (candidateFragments.length > 0) {
+          return candidateFragments.join('').replace(/\\([()])/g, '$1').replace(/\s+/g, ' ').trim();
+        }
+      }
+    }
+
+    // Método 2 (Fallback): Buscar por patrón tradicional de coma
     for (let i = 0; i < textMatches.length; i++) {
       const t = textMatches[i].text;
       const commaMatch = t.match(/, ?[A-ZÁÉÍÓÚÑ]/);
@@ -623,7 +680,7 @@ function getEmployeeNameFromPage(page, srcDoc) {
           name = prev + name;
           j--;
         }
-        return name.trim();
+        return name.replace(/\\([()])/g, '$1').replace(/\s+/g, ' ').trim();
       }
     }
   } catch (e) {
